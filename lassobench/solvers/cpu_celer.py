@@ -21,7 +21,7 @@ def _celer_one(X, Y, alphas, t, tol, max_iter, max_epochs, prune):
     y = np.ascontiguousarray(Y[:, t])
     res = celer_path(X, y, "lasso", alphas=alphas[:, t], tol=tol, max_iter=max_iter,
                      max_epochs=max_epochs, prune=prune, return_n_iter=True)
-    return sp.csc_matrix(res[1].astype(np.float32)), np.asarray(res[2]), np.asarray(res[-1])
+    return sp.csc_matrix(res[1]), np.asarray(res[2]), np.asarray(res[-1])
 
 
 def _factory(X, Y, alphas, **kw):

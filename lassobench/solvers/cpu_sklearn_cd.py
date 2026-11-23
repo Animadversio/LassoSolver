@@ -35,7 +35,7 @@ class SklearnCD(Solver):
                                                precompute=False, return_n_iter=True, check_input=False,
                                                copy_X=False)
             # lasso_path sorts alphas decreasingly; ours already are
-            return sp.csc_matrix(coefs.astype(np.float32)), np.asarray(gaps), np.asarray(iters)
+            return sp.csc_matrix(coefs), np.asarray(gaps), np.asarray(iters)
 
         out = per_target_parallel(one, T, self.kw.get("n_jobs"))
         coefs = assemble([o[0] for o in out], p, A)
