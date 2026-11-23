@@ -1,0 +1,16 @@
+id	idea	family	owner	status	detail	verdict
+sk-cd	sklearn coordinate descent, per target	CPU baseline	bench-harness	running	Reference solutions (float64, tol 1e-8) and the old production path.	No results yet
+celer	celer: working set + dual extrapolation	CPU baseline	bench-harness	running	State-of-the-art CPU solver for p >> n; the yardstick for GPU work.	No results yet
+ridge	RidgeCV as predictive baseline	CPU baseline	bench-harness	running	Lasso has to justify itself against Ridge on test R2 in the unit basis.	No results yet
+standardize	Column z-scoring of X	Preprocessing	bench-harness	running	Old runs used unscaled PCA columns (std 1 to 48); suspected cause of slow, non-converging fits.	No results yet
+cuml	cuML Lasso, batched sensibly	GPU library	bench-harness	planned	Old use ran 500 tiny fits one at a time and was far slower than CPU.	No results yet
+fista	Batched FISTA over targets x alphas	GPU first-order	gpu-prox	running	Two big matmuls per iteration, restart, per-problem gap stopping, float32 vs float64.	No results yet
+prox-adam	Prox-Adam / prox-SGD, full-batch and minibatch	GPU gradient	gpu-prox	running	The plain deep-learning optimizer route; only option when X does not fit on the GPU.	No results yet
+hadamard	w = u*v reparametrization with weight decay	GPU gradient	gpu-prox	running	Smooth objective whose minima match the Lasso; exact-zero seeking without a prox step.	No results yet
+subgrad	L1 subgradient + final threshold	GPU gradient	gpu-prox	running	Simplest gradient variant; sparsity only after post-hoc thresholding.	No results yet
+working-set	GPU-screened working set, small Gram subproblems	GPU working-set	gpu-workingset	running	GPU computes X'R for all targets; each problem is solved on a few hundred features. Expected front-runner.	No results yet
+dual-extrap	Anderson dual extrapolation	GPU working-set	gpu-workingset	running	Better dual points for earlier stopping and tighter screening, as in celer.	No results yet
+fold-batch	Batch the CV folds into one solve	GPU working-set	gpu-workingset	running	Fold masks as row weights or Gram downdates so all 6 fits share work.	No results yet
+admm	Woodbury ADMM with one shared n x n Cholesky	GPU splitting	gpu-workingset	running	One factorization serves every target and alpha; fast low-accuracy solutions.	No results yet
+ssnal	Semismooth-Newton augmented Lagrangian	GPU second-order	gpu-workingset	planned	Exploits second-order sparsity when active sets are small; optional stretch.	No results yet
+factorized	Factorized readout: spatially sparse x feature-wise dense	Model change	unassigned	later	Changes the model, not just the solver; parked until the Lasso benchmark is settled.	No results yet

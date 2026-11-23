@@ -1,0 +1,172 @@
+<meta name="dash-one-writer">
+<style>
+.ls { display: flex; flex-direction: column; gap: var(--cds-gap-xl); font-family: var(--font-anthropic-sans); color: var(--color-fg); }
+.ls h1 { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; text-wrap: balance; }
+.ls h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0; text-wrap: balance; }
+.ls p { margin: 0; max-width: 70ch; line-height: 1.5; }
+.ls .ls-muted { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.ls section { display: flex; flex-direction: column; gap: var(--cds-gap-md); min-width: 0; }
+.ls .ls-head { display: flex; flex-direction: column; gap: var(--cds-gap-sm); }
+.ls .ls-chart { position: relative; min-height: 260px; }
+.ls .ls-chart svg { display: block; width: 100%; }
+.ls .ls-chart text { font-family: var(--font-anthropic-sans); font-size: var(--cds-font-size-caption); fill: var(--color-fg); }
+.ls .ls-chart text.ls-sub { fill: var(--cds-text-secondary); }
+.ls .ls-chart text.ls-group { font-weight: var(--cds-font-weight-medium); }
+.ls .ls-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); box-shadow: var(--cds-shadow-popover); border-radius: var(--cds-radius); padding: var(--cds-pad-sm); font-size: var(--cds-font-size-caption); max-width: 260px; z-index: 2; }
+.ls .ls-tip b { display: block; }
+.ls .ls-tip span { display: block; color: var(--cds-text-secondary); }
+.ls .ls-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.ls .ls-key { display: inline-flex; align-items: center; gap: 6px; }
+.ls .ls-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.ls .ls-scroll { overflow-x: auto; }
+.ls table { border-collapse: collapse; width: 100%; font-size: var(--cds-font-size-body); font-variant-numeric: tabular-nums; }
+.ls th { text-align: left; font-weight: var(--cds-font-weight-medium); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+.ls td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--color-border-line); vertical-align: top; }
+.ls td.ls-num, .ls th.ls-num { text-align: right; }
+.ls td.ls-wide { min-width: 220px; }
+.ls td.ls-note { color: var(--color-fg-muted); min-width: 200px; }
+.ls .ls-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--color-border-line); font-size: var(--cds-font-size-caption); white-space: nowrap; }
+.ls .ls-pill[data-s="running"] { border-color: var(--color-warn); color: var(--color-warn); }
+.ls .ls-pill[data-s="kept"] { border-color: var(--color-ok); color: var(--color-ok); }
+.ls .ls-pill[data-s="dropped"] { border-color: var(--color-bad); color: var(--color-bad); }
+.ls .ls-pill[data-s="planned"], .ls .ls-pill[data-s="later"] { color: var(--color-fg-muted); }
+</style>
+<div class="ls">
+  <div class="ls-head">
+    <h1 id="top">LassoSolver Benchmark</h1>
+    <p>Tracking <b data-draw="n-ideas" data-source="n_ideas">—</b> solver ideas: <b data-draw="n-running" data-source="n_running">—</b> being implemented now, <b data-draw="n-kept" data-source="n_kept">—</b> kept and <b data-draw="n-dropped" data-source="n_dropped">—</b> dropped so far. The results table holds <b data-draw="n-results" data-source="n_results">—</b> timed runs.</p>
+    <p class="ls-muted">Workload: an independent Lasso per recording channel (64 to 384 channels), each with its own penalty chosen by 5-fold cross-validation, on DNN unit features (thousands to millions of features, about a thousand images).</p>
+  </div>
+
+  <section id="time">
+    <h2>Time for a full cross-validated fit, by solver</h2>
+    <p class="ls-muted">Wall-clock seconds on a log scale, shorter is better. Runs are grouped by dataset tier and number of channels fitted, so bars in one group are comparable.</p>
+    <div class="ls-legend"><span class="ls-key"><span class="ls-swatch" data-draw="sw-cpu"></span>CPU</span><span class="ls-key"><span class="ls-swatch" data-draw="sw-gpu"></span>GPU</span></div>
+    <div class="ls-chart dash-skeleton" id="time-chart" data-draw="time-chart" data-source="results"></div>
+  </section>
+
+  <section id="ideas">
+    <h2>Ideas tried and their status</h2>
+    <div class="ls-scroll">
+      <table id="ideas-table" data-source="ideas" data-row-key="id">
+        <thead><tr><th data-field="idea">Idea</th><th data-field="family">Family</th><th data-field="status">Status</th><th data-field="owner">Session</th><th data-field="detail">What it tests</th><th data-field="verdict">Verdict</th></tr></thead>
+        <tbody data-draw="ideas-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="results">
+    <h2>All timed runs</h2>
+    <p class="ls-muted">Test R² is the mean over channels of 1 − SSE/SST on held-out images. Nonzero fraction is the share of weights that are not exactly zero.</p>
+    <div class="ls-scroll">
+      <table id="results-table" data-source="results" data-row-key="id">
+        <thead><tr><th data-field="tier">Tier</th><th data-field="solver">Solver</th><th data-field="hardware">Hardware</th><th class="ls-num" data-field="targets">Channels</th><th class="ls-num" data-field="time_s">Time (s)</th><th class="ls-num" data-field="test_r2">Test R²</th><th class="ls-num" data-field="density">Nonzero fraction</th><th data-field="source">Source</th><th data-field="note">Note</th></tr></thead>
+        <tbody data-draw="results-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+<script>
+const count = (pred) => (ideas) => ideas.filter(pred).length;
+dash.calc('n_ideas', {inputs: ['ideas'], title: 'Ideas tracked', fn: (ideas) => ideas.length});
+dash.calc('n_running', {inputs: ['ideas'], title: 'Ideas in progress', fn: (ideas) => ideas.filter((d) => d.status === 'running').length});
+dash.calc('n_kept', {inputs: ['ideas'], title: 'Ideas kept', fn: (ideas) => ideas.filter((d) => d.status === 'kept').length});
+dash.calc('n_dropped', {inputs: ['ideas'], title: 'Ideas dropped', fn: (ideas) => ideas.filter((d) => d.status === 'dropped').length});
+dash.calc('n_results', {inputs: ['results'], title: 'Timed runs', fn: (results) => results.length});
+
+for (const [draw, id] of [['n-ideas', 'n_ideas'], ['n-running', 'n_running'], ['n-kept', 'n_kept'], ['n-dropped', 'n_dropped'], ['n-results', 'n_results']]) {
+  dash.draw(draw, (el) => {
+    const g = dash.data(id);
+    el.textContent = g.status === 'ok' && g.data != null ? String(g.data) : '—';
+  });
+}
+
+const CPU = 'var(--cds-chart-muted)';
+const GPU = dash.colors[0];
+dash.draw('sw-cpu', (el) => { el.style.background = CPU; });
+dash.draw('sw-gpu', (el) => { el.style.background = GPU; });
+
+const fmtTime = (t) => (t >= 100 ? d3.format(',.0f')(t) : t >= 10 ? d3.format('.1f')(t) : d3.format('.2~f')(t)) + ' s';
+
+dash.draw('time-chart', (el) => {
+  const g = dash.data('results');
+  if (g.status === 'loading') return;
+  el.classList.remove('dash-skeleton');
+  el.replaceChildren();
+  if (g.status !== 'ok') { el.textContent = g.status === 'error' ? 'The timing data failed to load.' : '—'; return; }
+  const rows = g.data.filter((d) => d.time_s > 0);
+  if (!rows.length) { el.textContent = 'No timed runs yet.'; return; }
+  const groups = d3.groups(rows, (d) => d.tier + ' · ' + d.targets + (d.targets === 1 ? ' channel' : ' channels'));
+  groups.forEach(([, rs]) => rs.sort((a, b) => a.time_s - b.time_s));
+  const W = Math.max(280, el.clientWidth), rowH = 38, groupH = 30, axisH = 28, valueW = 64;
+  const H = groups.length * groupH + rows.length * rowH + axisH + 6;
+  const lo = Math.min(0.1, d3.min(rows, (d) => d.time_s) / 2), hi = d3.max(rows, (d) => d.time_s) * 1.2;
+  const x = d3.scaleLog().domain([lo, hi]).range([0, W - valueW]);
+  const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H).attr('role', 'img')
+    .attr('aria-label', 'Horizontal bars of wall-clock seconds per solver, grouped by dataset tier, log scale');
+  const ticks = x.ticks(5).filter((t) => Math.abs(Math.log10(t) % 1) < 1e-9);
+  svg.append('g').selectAll('line').data(ticks).join('line').attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', H - axisH)
+    .style('stroke', 'var(--cds-chart-grid)');
+  svg.append('g').selectAll('text').data(ticks).join('text').attr('class', 'ls-sub').attr('x', x).attr('y', H - 8)
+    .attr('text-anchor', (t, i) => (i === 0 ? 'start' : 'middle')).text((t) => d3.format('~g')(t) + ' s');
+  const tip = d3.select(el).append('div').attr('class', 'ls-tip').attr('hidden', '');
+  let y = 0;
+  for (const [name, rs] of groups) {
+    svg.append('text').attr('class', 'ls-group').attr('x', 0).attr('y', y + 20).text(name);
+    y += groupH;
+    for (const d of rs) {
+      const gy = y, w = Math.max(2, x(d.time_s));
+      const row = svg.append('g').style('cursor', 'default');
+      row.append('rect').attr('x', 0).attr('y', gy).attr('width', W).attr('height', rowH).style('fill', 'transparent');
+      row.append('text').attr('x', 0).attr('y', gy + 12).text(d.solver);
+      row.append('text').attr('class', 'ls-sub').attr('x', W).attr('y', gy + 12).attr('text-anchor', 'end').text(d.hardware);
+      row.append('rect').attr('x', 0).attr('y', gy + 18).attr('width', w).attr('height', 12).attr('rx', 2)
+        .style('fill', d.device === 'gpu' ? GPU : CPU);
+      row.append('text').attr('x', w + 6).attr('y', gy + 28).text(fmtTime(d.time_s));
+      row.on('pointermove', (ev) => {
+        const box = el.getBoundingClientRect();
+        tip.attr('hidden', null).html('');
+        tip.append('b').text(d.solver);
+        tip.append('span').text(d.hardware + ' · ' + fmtTime(d.time_s));
+        if (d.test_r2 != null) tip.append('span').text('Test R² ' + d.test_r2 + (d.density != null ? ' · nonzero ' + d.density : ''));
+        if (d.note) tip.append('span').text(d.note);
+        const tw = tip.node().offsetWidth;
+        tip.style('left', Math.max(0, Math.min(ev.clientX - box.left + 12, box.width - tw)) + 'px').style('top', (gy + rowH + 2) + 'px');
+      }).on('pointerleave', () => tip.attr('hidden', ''));
+      y += rowH;
+    }
+  }
+});
+
+const cell = (tr, text, cls) => { const td = tr.insertCell(); td.textContent = text == null || text === '' ? '' : String(text); if (cls) td.className = cls; return td; };
+const failRow = (tb, n, text) => { const td = tb.insertRow().insertCell(); td.colSpan = n; td.textContent = text; };
+
+dash.draw('ideas-body', (tb) => {
+  const g = dash.data('ideas');
+  tb.replaceChildren();
+  if (g.status === 'loading') return;
+  if (g.status !== 'ok') { failRow(tb, 6, g.status === 'error' ? 'The ideas list failed to load.' : '—'); return; }
+  const order = {running: 0, kept: 1, planned: 2, later: 3, dropped: 4};
+  for (const d of [...g.data].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9))) {
+    const tr = tb.insertRow(); tr.dataset.key = encodeURIComponent(d.id);
+    cell(tr, d.idea, 'ls-wide'); cell(tr, d.family);
+    const pill = document.createElement('span'); pill.className = 'ls-pill'; pill.dataset.s = d.status; pill.textContent = d.status;
+    tr.insertCell().append(pill);
+    cell(tr, d.owner); cell(tr, d.detail, 'ls-note'); cell(tr, d.verdict, 'ls-wide');
+  }
+});
+
+dash.draw('results-body', (tb) => {
+  const g = dash.data('results');
+  tb.replaceChildren();
+  if (g.status === 'loading') return;
+  if (g.status !== 'ok') { failRow(tb, 9, g.status === 'error' ? 'The results failed to load.' : '—'); return; }
+  const rows = [...g.data].sort((a, b) => d3.ascending(a.tier, b.tier) || d3.descending(a.targets, b.targets) || d3.ascending(a.time_s, b.time_s));
+  for (const d of rows) {
+    const tr = tb.insertRow(); tr.dataset.key = encodeURIComponent(d.id);
+    cell(tr, d.tier); cell(tr, d.solver, 'ls-wide'); cell(tr, d.hardware);
+    cell(tr, d.targets, 'ls-num'); cell(tr, d.time_s, 'ls-num'); cell(tr, d.test_r2, 'ls-num'); cell(tr, d.density, 'ls-num');
+    cell(tr, d.source); cell(tr, d.note, 'ls-note');
+  }
+});
+</script>

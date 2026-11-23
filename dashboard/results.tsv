@@ -1,0 +1,10 @@
+tier	solver	hardware	device	targets	time_s	test_r2	density	source	note
+pca1k-old	sklearn LassoCV per target	16 CPU threads	cpu	64	112.5	0.147	0.052	2024-12 dev notebook	Unstandardized X, 100 alphas x 5 folds
+pca1k-old	celer LassoCV per target	16 CPU threads	cpu	64	178.8			2024-12 dev notebook	No gain from multithreading
+pca1k-old	celer LassoCV per target	1 CPU thread	cpu	64	887			2024-12 dev notebook	About 15 min
+pca1k-old	sklearn MultiTaskLassoCV	16 CPU threads	cpu	64	11.8	0.149	0.183	2024-12 dev notebook	Shared row sparsity across channels: a different problem
+pca1k-old	celer MultiTaskLassoCV	16 CPU threads	cpu	64	50.2			2024-12 dev notebook	Shared row sparsity across channels
+pca1k-old	RidgeCV	16 CPU threads	cpu	64	0.2	0.162	1	2024-12 notebooks	Dense weights; R2 recorded with resnet50 features
+pca1k-old	sklearn LassoCV	16 CPU threads	cpu	1	4.0	0.188	0.092	2024-12 dev notebook	Single channel
+pca1k-old	celer LassoCV	16 CPU threads	cpu	1	7.2	0.188	0.092	2024-12 dev notebook	Single channel
+pca1k-old	cuML Lasso via GridSearchCV	GPU (model not recorded)	gpu	1	302.8	0.188	0.092	2024-12 dev notebook	500 tiny GPU fits run one at a time
