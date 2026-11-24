@@ -501,6 +501,15 @@ class TorchFISTA(Solver):
                             S_host = None if S is None else S.cpu().numpy()
                             Xa = Xg if S is None else Xg.index_select(1, S)
                             q = q_new
+                            # step size from the reduced matrix: L(X_S) <= L(X), often much smaller
+                            if S is None:
+                                L_new = L_f
+                            else:
+                                L_new = np.array([lipschitz(Xa, None if masks is None else masks[f], n_iter=100)
+                                                  for f in range(F)])
+                            L_f_g.copy_(torch.as_tensor(L_new, device=dev, dtype=torch.float64))
+                            Lb.copy_(L_f_g[torch.as_tensor(s_f, device=dev)])
+                            tk.fill_(1.0)                            # momentum restart after step change
                     q_trace.append(q)
             if self.verbose:
                 print(f"it {total_it} B {B} pending {len(pending)} median rel {np.median(relh):.2e}", flush=True)
