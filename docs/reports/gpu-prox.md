@@ -28,6 +28,8 @@ copied from one of those files.
     regularization, not a better Lasso solver; worth a note to the coordinator as a modelling result.
   - Minibatch prox-Adam (bs 128, 100 epochs): R2 0.338, nnz 299, 99 s for CV; it is the only route when X does
     not fit on the GPU, and streaming X from pinned host memory costs 1.85x (P: 21.8 s vs 11.8 s).
+- **Round 2 (section 11): at matched sparsity no gradient method beats relaxed exact Lasso** (k <= 100 all
+  differences <= +0.004, mostly significantly negative); the early-stopped R2 edge is a density effect.
 - **Recommendation:** keep `torch_fista` only as (a) the small-p / PCA-tier solver and (b) a reference
   implementation of the batched-CV-by-masks trick (worth porting to `torch_ws` if it does not do it already).
   Keep `torch_hadamard_adam` as the honest answer to "can a plain DL optimizer do Lasso": yes, it matches the
@@ -219,9 +221,27 @@ Takeaways:
 - `torch.nonzero` cannot handle > 2^31 elements: extraction is now chunked (hit at unit-800k, fixed in
   `_torch_common.extract_rows`).
 
-## 8. unit-800k and A100 rows
+## 8. unit-800k, FISTA CV and A100 rows
 
-(filled in below as the harness jobs finish)
+Harness rows (H200, tol 1e-4 where applicable; the unit-800k tier as served to these runs had T=64):
+
+| tier | solver | task | time s | result |
+|---|---|---|---|---|
+| unit-100k | torch_fista | CV | 1043.5 | R2 reliable 0.3257, nnz median 120 (same as exact; torch_ws: 33 s) |
+| unit-800k | torch_prox_sgd (300 ep) | P | 82.8 | gap median 0.23, nnz median 1.7e5 |
+| unit-800k | torch_prox_adam (300 ep, lr 1e-2) | P | 115.6 | diverged: gap median 38.5, nnz median 5.8e5 |
+| unit-800k | torch_prox_adam_mb (bs 128, 30 ep, lr 1e-2) | P | 68.4 | diverged: gap median 201 |
+| unit-800k | torch_fista screen | P | UNIT800K_FISTA | |
+
+- The first unit-800k gradient-optimizer rows errored in sparse extraction (`torch.nonzero` refuses tensors with
+  more than 2^31 elements; a wave of ~9000 slots x 780k features). Fixed in `_torch_common.extract_rows` (chunked);
+  the rows above are the reruns.
+- The remaining prox-Adam failure on unit-800k is not a crash but the learning rate: lr 1e-2 that worked on
+  unit-100k diverges at p = 780k (Adam's per-coordinate step does not shrink with p, unlike 1/L). Prox-SGD with
+  step 1/L is stable on both tiers. Not tuned further (the round-2 decision below makes it moot).
+- The A100 FISTA harness job (63236137) was cancelled before it started: after the round-1 decision (full-p FISTA
+  dropped for the unit basis) it would only spend ~10 GPU-hours confirming a known timeout. A100 numbers for
+  FISTA exist on synthetic data (section 3) and pca1k-scale problems.
 
 ## 9. Keep / drop
 
@@ -248,3 +268,51 @@ Takeaways:
   `iters`, `rel_gap` arrays; currently dropped as non-scalar).
 - Modelling note for spec section 8: loose (early-stopped) proximal solutions beat exact Lasso and Ridge on
   unit-100k reliable channels; elastic-net / relaxed-Lasso deserve a row.
+
+## 11. Round 2: do gradient methods keep their R2 advantage at matched sparsity? (unit-100k)
+
+Setup (`scripts/dev_prox_sparsity.py`, H200, results `STORE/results/prox/sparsity_unit-100k.json`, table via
+`scripts/dev_prox_sparsity_table.py`): the 822 training rows are split 658 fit / 164 validation (seed 0); every
+choice (alpha, ridge lambda for refits, IHT stopping iteration) is made per channel on validation; the 206 test
+rows are only used for the numbers below. Mean test R2 over the 20 reliable channels. Ridge on all features
+(lambda on validation) gives 0.335 on this split.
+
+Methods: exact Lasso path (torch_ws, tol 1e-4; `lasso` = standard grid to 1e-2 alpha_max, `lasso_ext` = 70 alphas
+to 1e-3 alpha_max so the path can reach large k), prox-SGD (ISTA 1000 ep), prox-Adam (300 ep, lr 1e-2), Hadamard
+u*v Adam (1000 ep + final prox), and two hard-sparsity trainers: `iht` (accelerated projected gradient, step 1/L,
+top-k projection every step) and `iht_adam` (Adam step + top-k projection), stopped at 100/300/1000 iterations.
+Readouts: `path` = Lasso solution whose nnz is closest to k; `trunc` = top-k |w| (alpha on validation); `refit` =
+top-k support then ridge refit on the kept units ((alpha, lambda) on validation); `path_refit` = relaxed Lasso.
+
+Mean test R2 (paired difference vs relaxed exact Lasso `lasso_ext path_refit` +- paired SE over the 20 channels):
+
+| method | readout | k=10 | k=30 | k=100 | k=300 | k=1000 |
+|---|---|---|---|---|---|---|
+| exact Lasso | path | 0.114 | 0.213 | 0.312 | 0.305 | 0.172 |
+| **exact Lasso** | **path + ridge refit (relaxed)** | **0.214** | **0.280** | **0.332** | **0.324** | **0.305** |
+| exact Lasso | top-k + refit | 0.212 (-0.003+-0.008) | 0.252 (-0.028+-0.008) | 0.326 (-0.006+-0.005) | 0.320 (-0.003+-0.005) | 0.311 (+0.006+-0.008) |
+| prox-SGD | top-k | 0.071 (-0.144+-0.017) | 0.134 (-0.147+-0.020) | 0.232 (-0.100+-0.013) | 0.310 (-0.014+-0.007) | 0.351 (+0.046+-0.006) |
+| prox-SGD | top-k + refit | 0.204 (-0.011+-0.011) | 0.251 (-0.029+-0.008) | 0.309 (-0.023+-0.008) | 0.332 (+0.008+-0.011) | 0.333 (+0.028+-0.011) |
+| prox-Adam | top-k | 0.168 (-0.047+-0.012) | 0.240 (-0.040+-0.011) | 0.289 (-0.043+-0.009) | 0.334 (+0.010+-0.005) | 0.350 (+0.045+-0.006) |
+| prox-Adam | top-k + refit | 0.199 (-0.015+-0.012) | 0.267 (-0.013+-0.007) | 0.315 (-0.017+-0.011) | 0.333 (+0.009+-0.005) | 0.335 (+0.030+-0.010) |
+| Hadamard u*v | top-k | 0.163 (-0.051+-0.014) | 0.243 (-0.038+-0.011) | 0.312 (-0.020+-0.004) | 0.308 (-0.016+-0.005) | 0.307 (+0.002+-0.007) |
+| Hadamard u*v | top-k + refit | 0.218 (+0.003+-0.008) | 0.254 (-0.026+-0.008) | 0.324 (-0.008+-0.007) | 0.320 (-0.004+-0.005) | 0.314 (+0.009+-0.009) |
+| IHT (hard top-k) | as trained | 0.185 (-0.029+-0.013) | 0.209 (-0.071+-0.014) | 0.276 (-0.056+-0.015) | 0.315 (-0.009+-0.013) | 0.318 (+0.013+-0.012) |
+| IHT (hard top-k) | + refit | 0.209 (-0.006+-0.008) | 0.249 (-0.031+-0.010) | 0.285 (-0.047+-0.009) | 0.323 (-0.000+-0.009) | 0.340 (+0.035+-0.008) |
+| IHT-Adam | + refit | 0.126 (-0.089+-0.016) | 0.162 (-0.118+-0.025) | 0.208 (-0.124+-0.013) | 0.232 (-0.092+-0.013) | 0.259 (-0.046+-0.009) |
+
+(IHT-Adam without refit is unstable: test R2 down to -0.83.) Fit times on the 658-row split: Lasso 41.7 s
+(extended grid 84.1 s), prox-SGD 28.8 s, prox-Adam 12.4 s, Hadamard 48.5 s, IHT 4.2 s for all five k at once.
+
+Caveat at k=1000: the Lasso path does not reach 1000 nonzeros on either grid (median nnz of the densest point: 614
+standard, 679 extended), so the k=1000 column compares ~650-unit Lasso supports with 1000-unit gradient supports;
+it is the dense, ridge-like regime (prox-SGD/Adam top-1000 reach 0.35, above ridge's 0.335 on this split).
+
+**Answer: no.** At the sparse operating points the readout is for (k <= 100), no gradient-based method beats the
+relaxed exact Lasso at the same k: every difference is <= +0.004 and most are significantly negative (prox-SGD /
+prox-Adam truncations lose 0.04-0.15; hard-sparsity IHT loses 0.03-0.07 before refit). Hadamard u*v tracks exact
+Lasso (it converges to the same solutions). The only positive differences are at k = 300 (+0.008 to +0.010,
+1-2 SE, i.e. not established with 20 channels) and at k = 1000, where exact Lasso cannot reach k at all. The early-
+stopped R2 advantage reported in section 6 is a density effect, not a better sparse readout. Recommendation: use
+exact Lasso (torch_ws) plus a ridge refit on its support (relaxed Lasso adds +0.02 to +0.10 over the plain path at
+k <= 30 and +0.02 at k = 100-300); stop investing in gradient-based sparse methods.
