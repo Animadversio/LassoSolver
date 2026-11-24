@@ -15,6 +15,10 @@ Contents
   returns max |x_j^T r_b| (dual scaling), the top-M features per problem (working-set candidates)
   and the strong-rule counts, without ever materializing (p, B).
 - `gap_from_stats`: duality gap with the residual-rescaling dual point.
+
+Nonnegative Lasso (`positive`): the same problem with w >= 0. The coordinate update keeps only the
+positive branch of the soft threshold, and the dual constraint is one-sided (x_j^T theta <= lam), so
+every "max |x_j^T r|" becomes "max (x_j^T r)_+" and candidates are ranked by signed correlation.
 """
 from __future__ import annotations
 
@@ -33,7 +37,8 @@ extern "C" __global__ void cd_gram(
     const double* __restrict__ lam, const double* __restrict__ yy, const double* __restrict__ tol,
     const int max_ep, const int act_passes,
     int* __restrict__ ep_out, double* __restrict__ gap_out,
-    const int anderson, double* __restrict__ snaps, double* __restrict__ wacc, double* __restrict__ qacc)
+    const int anderson, double* __restrict__ snaps, double* __restrict__ wacc, double* __restrict__ qacc,
+    const int positive)
 {
     extern __shared__ double sh[];
     const int b = blockIdx.x;
@@ -80,7 +85,7 @@ extern "C" __global__ void cd_gram(
         // ---- restricted duality gap (residual rescaling) ----
         double cw = 0, qw = 0, l1 = 0, qm = 0;
         for (int i = tid; i < k; i += bs) {
-            cw += cb[i] * w[i]; qw += q[i] * w[i]; l1 += fabs(w[i]); qm = fmax(qm, fabs(q[i]));
+            cw += cb[i] * w[i]; qw += q[i] * w[i]; l1 += fabs(w[i]); qm = fmax(qm, positive ? q[i] : fabs(q[i]));
         }
         for (int o = 16; o > 0; o >>= 1) {
             cw += __shfl_down_sync(0xffffffff, cw, o); qw += __shfl_down_sync(0xffffffff, qw, o);
@@ -117,7 +122,7 @@ extern "C" __global__ void cd_gram(
                 if (tid == 0) {
                     const double wj = w[j], dj = d[j];
                     const double z = wj + q[j] / dj, th = lb / dj;
-                    const double wn = (z > th) ? z - th : ((z < -th) ? z + th : 0.0);
+                    const double wn = (z > th) ? z - th : ((!positive && z < -th) ? z + th : 0.0);
                     s_delta = wn - wj;
                     w[j] = wn;
                 }
@@ -191,6 +196,7 @@ extern "C" __global__ void cd_gram(
                     for (int i = tid; i < k; i += bs) {
                         double v = 0;
                         for (int m = 0; m < 4; ++m) v += s_coef[m] * sb[(m + 1) * K + i];
+                        if (positive && v < 0.0) v = 0.0;      // keep the extrapolated point feasible
                         wa[i] = v; qa[i] = cb[i];
                     }
                     __syncthreads();
@@ -257,13 +263,15 @@ def max_k_smem() -> int:
     return (lim - 8192) // smem_per_k()
 
 
-def cd_gram_batched(G, goff, ldg, pos, kk, c, dg, w, lam, yy, tol, max_ep=2000, act_passes=4, anderson=True):
+def cd_gram_batched(G, goff, ldg, pos, kk, c, dg, w, lam, yy, tol, max_ep=2000, act_passes=4, anderson=True,
+                    positive=False):
     """Run the batched Gram CD kernel in place on `w` (B, K) float64.
 
     G: float32 or float64 tensor holding all union Grams (flat). goff: (B,) int64 element offset of each
     problem's Gram. ldg: row stride. pos: (B, K) int32 positions into that Gram. kk: (B,) int32
     working-set sizes (entries beyond kk[b] are ignored). c: (B, K) float64 x_j^T y_b. dg: (B, K)
-    float64 Gram diagonal. lam, yy, tol: (B,) float64. Returns (epochs (B,), restricted rel gap (B,)).
+    float64 Gram diagonal. lam, yy, tol: (B,) float64. positive: solve the nonnegative Lasso (w >= 0).
+    Returns (epochs (B,), restricted rel gap (B,)).
     """
     import cupy as cp
     B, K = w.shape
@@ -284,7 +292,8 @@ def cd_gram_batched(G, goff, ldg, pos, kk, c, dg, w, lam, yy, tol, max_ep=2000, 
     torch.cuda.current_stream().synchronize()
     kern((B,), (bs,), (a(G), a(goff), np.int64(ldg), a(pos), a(kk), np.int32(K), a(c), a(dg), a(w),
                        a(lam), a(yy), a(tol), np.int32(max_ep), np.int32(act_passes), a(ep), a(gap),
-                       np.int32(1 if anderson else 0), a(snaps), a(wacc), a(qacc)),
+                       np.int32(1 if anderson else 0), a(snaps), a(wacc), a(qacc),
+                       np.int32(1 if positive else 0)),
          shared_mem=smem)
     cp.cuda.get_current_stream().synchronize()
     return ep, gap
@@ -322,7 +331,7 @@ __global__ void cd2(
     const double* __restrict__ lam, const double* __restrict__ yy, const double* __restrict__ tol,
     const int max_ep, const int act_passes, int* __restrict__ ep_out, double* __restrict__ gap_out,
     const int anderson, double* __restrict__ snaps, float* __restrict__ GA, const int acap, const int snap_every,
-    const double* __restrict__ l2v)
+    const double* __restrict__ l2v, const int positive)
 {
     extern __shared__ double sh[];
     const int b = blockIdx.x, tid = threadIdx.x, bs = blockDim.x;
@@ -364,7 +373,7 @@ __global__ void cd2(
         // ---- gap ----
         {
             double v[4] = {0, 0, 0, 0};
-            for (int i = tid; i < k; i += bs) { v[0] += cb[i] * w[i]; v[1] += q[i] * w[i]; v[2] += fabs(w[i]); v[3] = fmax(v[3], fabs(q[i])); }
+            for (int i = tid; i < k; i += bs) { v[0] += cb[i] * w[i]; v[1] += q[i] * w[i]; v[2] += fabs(w[i]); v[3] = fmax(v[3], positive ? q[i] : fabs(q[i])); }
             block_reduce(v, 4, red, tid, bs, ismax);
             if (tid == 0) {
                 const double cw = red[0][0], qw = red[1][0], l1 = red[2][0], qm = red[3][0];
@@ -381,7 +390,7 @@ __global__ void cd2(
         for (int j = 0; j < k; ++j) {
             if (tid == 0) {
                 const double wj = w[j], z = wj + q[j] * di[j], th = lb * di[j];
-                const double wn = (z > th) ? z - th : ((z < -th) ? z + th : 0.0);
+                const double wn = (z > th) ? z - th : ((!positive && z < -th) ? z + th : 0.0);
                 s_delta = wn - wj; w[j] = wn;
             }
             __syncthreads();
@@ -416,7 +425,7 @@ __global__ void cd2(
                     const int j = act[a];
                     if (tid == 0) {
                         const double wj = w[j], z = wj + q[j] * di[j], th = lb * di[j];
-                        const double wn = (z > th) ? z - th : ((z < -th) ? z + th : 0.0);
+                        const double wn = (z > th) ? z - th : ((!positive && z < -th) ? z + th : 0.0);
                         s_delta = wn - wj; w[j] = wn;
                     }
                     if (a + 1 < na) {
@@ -439,7 +448,7 @@ __global__ void cd2(
                     const int j = act[a];
                     if (tid == 0) {
                         const double wj = w[j], z = wj + q[j] * di[j], th = lb * di[j];
-                        const double wn = (z > th) ? z - th : ((z < -th) ? z + th : 0.0);
+                        const double wn = (z > th) ? z - th : ((!positive && z < -th) ? z + th : 0.0);
                         s_delta = wn - wj; w[j] = wn;
                     }
                     __syncthreads();
@@ -492,6 +501,7 @@ __global__ void cd2(
                         for (int t = tid; t < na; t += bs) {
                             double v = 0;
                             for (int m = 0; m < 4; ++m) v += s_coef[m] * sb[(m + 1) * acap + t];
+                            if (positive && v < 0.0) v = 0.0;      // keep the extrapolated point feasible
                             wa[t] = v; qa[t] = cb[act[t]];
                         }
                         __syncthreads();
@@ -555,7 +565,7 @@ def warm_kernels():
 
 
 def cd2_gram_batched(G, goff, ldg, pos, kk, c, dg, w, lam, yy, tol, max_ep=2000, act_passes=25, anderson=True,
-                     acap=None, ga_bytes=2 ** 33, snap_every=5, l2=None):
+                     acap=None, ga_bytes=2 ** 33, snap_every=5, l2=None, positive=False):
     """Kernel v2 (see _KERNEL2_SRC). Same interface as cd_gram_batched; `acap` = compaction capacity."""
     import cupy as cp
     B, K = w.shape
@@ -581,7 +591,8 @@ def cd2_gram_batched(G, goff, ldg, pos, kk, c, dg, w, lam, yy, tol, max_ep=2000,
     kern((B,), (bs,), (a(G), a(goff), np.int64(ldg), a(pos), a(kk), np.int32(K), a(c), a(dg), a(w),
                        a(lam), a(yy), a(tol), np.int32(max_ep), np.int32(act_passes), a(ep), a(gap),
                        np.int32(1 if anderson else 0), a(snaps), a(GA), np.int32(acap), np.int32(snap_every),
-                       a(l2 if l2 is not None else torch.zeros(B, dtype=torch.float64, device=dev))),
+                       a(l2 if l2 is not None else torch.zeros(B, dtype=torch.float64, device=dev)),
+                       np.int32(1 if positive else 0)),
          shared_mem=smem)
     cp.cuda.get_current_stream().synchronize()
     return ep, gap
@@ -624,7 +635,8 @@ class HostX:
         return torch.from_numpy(np.ascontiguousarray(self.X[:, ii], dtype=np.float32)).to(dev)
 
 
-def full_corr_stats(Xd, Rt, M, thr=None, chunk_bytes=2 ** 31, inv_norm=None, lam=None, corr=None):
+def full_corr_stats(Xd, Rt, M, thr=None, chunk_bytes=2 ** 31, inv_norm=None, lam=None, corr=None,
+                    positive=False):
     """Stats of C = R^T X (B, p) computed in feature chunks.
 
     Xd: (n, p) float32 (on GPU, or a host tensor that is streamed chunk-wise if `stream=True`). Rt: (B, n) float32 residuals (already masked per fold).
@@ -634,6 +646,9 @@ def full_corr_stats(Xd, Rt, M, thr=None, chunk_bytes=2 ** 31, inv_norm=None, lam
         augmented-Lasso correlation is x_j^T r - l2 w_j on the support).
     inv_norm, lam: if given, candidates are ranked by the celer score (|c_j| - lam_b) / ||x_j||
     (distance to the dual constraint, valid for unnormalized columns) instead of |c_j|.
+    positive: nonnegative Lasso. The dual constraint is one-sided, so everything above uses the signed
+    c_j in place of |c_j|: qmax = max_j (c_j)_+, the strong rule counts c_j > thr, and candidates are the
+    most positively correlated features.
     Returns dict(qmax (B,) float64, top_idx (B, M) int64, top_val (B, M) float32, n_strong (B,)).
     """
     p = Xd.shape[1]
@@ -658,8 +673,9 @@ def full_corr_stats(Xd, Rt, M, thr=None, chunk_bytes=2 ** 31, inv_norm=None, lam
             sel = (cid >= j0) & (cid < j0 + Cc.shape[1])
             if sel.any():
                 Cc.index_put_((cb[sel], cid[sel] - j0), -cv[sel], accumulate=True)
-        Cc.abs_()
-        qmax = torch.maximum(qmax, Cc.max(dim=1).values)
+        if not positive:
+            Cc.abs_()
+        qmax = torch.maximum(qmax, Cc.max(dim=1).values)      # qmax starts at 0: (c_j)_+ when positive
         if thr is not None:
             nst += (Cc > thr32).sum(dim=1)
         if M > 0:
