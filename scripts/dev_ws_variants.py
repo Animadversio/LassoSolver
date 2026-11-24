@@ -37,6 +37,8 @@ def kw_of(v):
     for part in v.split("+"):
         if part.startswith("enet"):
             kw["l1_ratio"] = float(part[4:])
+        elif part == "relaxcv":
+            kw["relax"] = "cv"
         elif part.startswith("relax"):
             kw["relax_gamma"] = float(part[5:])
     return kw
@@ -73,6 +75,14 @@ for v in variants:
                    fold_jaccard_rel_median=float(np.median(jac[rel])),
                    alpha_stop_mean=r["info"]["fold_infos"][0].get("alpha_stop_mean"),
                    timings_folds={k: round(x, 1) for k, x in r["info"]["fold_infos"][0]["timings"].items() if x > 0.5})
+        if "relax" in r["info"]:
+            WL = r["coef_lasso"].toarray()
+            rl_ = r2(WL)
+            ri = r["info"]["relax"]
+            row.update(lasso_same_run_r2_rel=float(rl_[rel].mean()), lasso_same_run_nnz_median_rel=float(np.median((WL != 0).sum(0)[rel])),
+                       time_relax_cv_s=ri["time_relax_cv_s"], time_relax_final_s=ri.get("time_relax_final_s"),
+                       frac_no_refit=ri["frac_no_refit"], penalty_hist=np.bincount(ri["penalty_idx"], minlength=len(ri["grid"]) + 1).tolist())
+            pen_per_alpha = np.array(ri["penalty_idx_per_alpha"])          # (A, T)
         print(json.dumps(row), flush=True)
         open(f"{STORE}/results/ws_dev/variants.jsonl", "a").write(json.dumps(row) + "\n")
         torch.cuda.empty_cache()
@@ -81,6 +91,25 @@ for v in variants:
     t0 = time.perf_counter()
     res = s.fit_path(X, Y, alphas)
     t_p = time.perf_counter() - t0
+    if kw.get("relax") == "cv":
+        from lassobench.solvers.torch_ws import RELAX_GRID, _support_ridge, _triplets_to_supports
+        dev = torch.device("cuda")
+        Xg = torch.from_numpy(X).to(dev)
+        Yg = torch.from_numpy(Y).to(dev)
+        allr = torch.arange(X.shape[0], device=dev)
+        newc = []
+        for a, c in enumerate(res.coefs):
+            cc = c.tocoo()
+            ids, lv, valid = _triplets_to_supports(cc.row, cc.col, cc.data, list(range(T)), dev)
+            bet, _ = _support_ridge(Xg, Yg, allr, None, ids, valid, RELAX_GRID)
+            li = torch.as_tensor(pen_per_alpha[a], device=dev).long()
+            ch = bet[li.clamp(max=len(RELAX_GRID) - 1), torch.arange(T, device=dev)]
+            ch = torch.where((li == len(RELAX_GRID))[:, None], lv, ch) * valid
+            tt = torch.arange(T, device=dev)[:, None].expand_as(ids)
+            import scipy.sparse as sp_
+            newc.append(sp_.csc_matrix((ch[valid].cpu().numpy(), (ids[valid].cpu().numpy(), tt[valid].cpu().numpy())), shape=c.shape))
+        res.coefs = newc
+        del Xg, Yg
     R2 = np.array([r2(c.toarray()) for c in res.coefs])          # (A, T)
     NZ = np.array([np.diff(c.indptr) for c in res.coefs])         # (A, T)
     fr = {}

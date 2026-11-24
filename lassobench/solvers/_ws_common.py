@@ -546,6 +546,14 @@ def _get_kernel2(gt, mp):
     return _kernel2_cache[key][mp]
 
 
+def warm_kernels():
+    """Compile (or load) both Gram-dtype variants of the CD kernels once per process, so the harness warm-up
+    absorbs NVRTC time even when the timed run switches to fp32 per-problem Grams."""
+    for gt in ("double", "float"):
+        _get_kernel2(gt, _MPS[0])
+        _get_kernel(gt)
+
+
 def cd2_gram_batched(G, goff, ldg, pos, kk, c, dg, w, lam, yy, tol, max_ep=2000, act_passes=25, anderson=True,
                      acap=None, ga_bytes=2 ** 33, snap_every=5, l2=None):
     """Kernel v2 (see _KERNEL2_SRC). Same interface as cd_gram_batched; `acap` = compaction capacity."""

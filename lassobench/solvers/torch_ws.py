@@ -25,7 +25,7 @@ import numpy as np
 import torch
 
 from lassobench.api import PathResult, Solver
-from lassobench.solvers._ws_common import (HostX, Timer, cd2_gram_batched, cd_gram_batched, full_corr_stats, gap_from_stats,
+from lassobench.solvers._ws_common import (HostX, Timer, warm_kernels, cd2_gram_batched, cd_gram_batched, full_corr_stats, gap_from_stats,
                                            max_k_smem, to_csc_list)
 
 
@@ -367,6 +367,7 @@ def _solve_batched(X, Y, alphas, masks, tol, max_outer=100, min_ws=64, inner_rat
     extract_at: (B,) if given, only problem b's solution at alpha extract_at[b] is returned.
     val_mse: also return (A, B) held-out MSE on rows where mask == 0 (info["val_mse"]).
     """
+    warm_kernels()
     tm = Timer()
     t_start = time.perf_counter()
     tol_user = tol
@@ -620,7 +621,90 @@ def _solve_batched(X, Y, alphas, masks, tol, max_outer=100, min_ws=64, inner_rat
     return rows, cols, vals, info
 
 
-_CV_ONLY = ("select", "cv_stop", "cv_batch")
+_CV_ONLY = ("select", "cv_stop", "cv_batch", "relax", "relax_grid")
+RELAX_GRID = (1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0)
+
+
+def _xcols(Xd, ids, dev):
+    """Columns `ids` (1-D long, on dev) of X as a (n, m) float64 GPU tensor (GPU copy or host-streamed X)."""
+    if isinstance(Xd, HostX):
+        return Xd.cols(ids, dev).double()
+    return Xd[:, ids].double()
+
+
+def _support_ridge(Xd, Yd, rows_fit, rows_val, ids, valid, grid, chunk_bytes=2 ** 31):
+    """Batched ridge refits restricted to per-problem supports.
+
+    ids/valid: (B, k) global feature ids of each problem's support (padded) and its mask; Yd (n, B) targets
+    (column b belongs to problem b). For each relative penalty g in `grid`:
+        beta = (X_S^T X_S + g * mean(diag X_S^T X_S) I)^{-1} X_S^T y   on rows_fit,
+    returns (betas (len(grid), B, k), val_mse (len(grid), B) on rows_val or None)."""
+    B, k = ids.shape
+    dev = ids.device
+    L = len(grid)
+    betas = torch.zeros(L, B, k, dtype=torch.float64, device=dev)
+    vmse = torch.full((L, B), float("inf"), dtype=torch.float64, device=dev) if rows_val is not None else None
+    if k == 0 or B == 0:
+        return betas, vmse
+    n = int(rows_fit.numel()) + (int(rows_val.numel()) if rows_val is not None else 0)
+    bc = max(1, int(chunk_bytes // (8 * k * max(n, k) * 3)))
+    gr = torch.as_tensor(grid, dtype=torch.float64, device=dev)
+    ar = torch.arange(k, device=dev)
+    for i0 in range(0, B, bc):
+        sl = slice(i0, min(B, i0 + bc))
+        idc, vl = ids[sl], valid[sl]
+        u, inv = torch.unique(idc[vl], return_inverse=True)
+        if u.numel() == 0:
+            continue
+        Xu = _xcols(Xd, u, dev)                                     # (n, m)
+        loc = torch.zeros_like(idc)
+        loc[vl] = inv
+        Xf = Xu[rows_fit]                                           # (n_fit, m)
+        Xs = Xf[:, loc].permute(1, 0, 2) * vl[:, None, :]           # (b, n_fit, k)
+        G = torch.bmm(Xs.transpose(1, 2), Xs)
+        c = torch.bmm(Xs.transpose(1, 2), Yd[rows_fit][:, sl].T.double()[:, :, None])[:, :, 0]
+        del Xs
+        md = (torch.diagonal(G, dim1=1, dim2=2) * vl).sum(1) / vl.sum(1).clamp(min=1)
+        if rows_val is not None:
+            Xv = Xu[rows_val][:, loc].permute(1, 0, 2) * vl[:, None, :]   # (b, n_val, k)
+            yv = Yd[rows_val][:, sl].T.double()                          # (b, n_val)
+        for li in range(L):
+            Gl = G.clone()
+            Gl[:, ar, ar] += torch.where(vl, gr[li] * md[:, None].clamp(min=1e-12), torch.ones_like(Gl[:, ar, ar]))
+            Lc, info = torch.linalg.cholesky_ex(Gl)
+            bet = torch.cholesky_solve(c[:, :, None], Lc)[:, :, 0] * vl
+            bet = torch.where((info == 0)[:, None], bet, torch.zeros_like(bet))
+            betas[li, sl] = bet
+            if rows_val is not None:
+                pred = torch.bmm(Xv, bet[:, :, None])[:, :, 0]
+                vmse[li, sl] = ((yv - pred) ** 2).mean(1)
+        del G
+    return betas, vmse
+
+
+def _triplets_to_supports(rows, cols, vals, sel_cols, dev):
+    """From one alpha's (feature, problem, value) triplets, padded supports for problems `sel_cols` (list)."""
+    r = torch.as_tensor(rows, device=dev).long()
+    c = torch.as_tensor(cols, device=dev).long()
+    v = torch.as_tensor(vals, device=dev).double()
+    sel = torch.as_tensor(sel_cols, device=dev).long()
+    pos_of = torch.full((int(max(c.max().item() if c.numel() else 0, sel.max().item())) + 1,), -1, dtype=torch.long, device=dev)
+    pos_of[sel] = torch.arange(sel.numel(), device=dev)
+    keep = pos_of[c] >= 0 if c.numel() else torch.zeros(0, dtype=torch.bool, device=dev)
+    r, c, v = r[keep], pos_of[c[keep]], v[keep]
+    Bs = sel.numel()
+    cnt = torch.bincount(c, minlength=Bs)
+    k = int(cnt.max()) if cnt.numel() else 0
+    ids = torch.zeros(Bs, max(k, 1), dtype=torch.long, device=dev)
+    lv = torch.zeros(Bs, max(k, 1), dtype=torch.float64, device=dev)
+    valid = torch.zeros(Bs, max(k, 1), dtype=torch.bool, device=dev)
+    if r.numel():
+        o = torch.argsort(c, stable=True)
+        r, c, v = r[o], c[o], v[o]
+        start = torch.cumsum(cnt, 0) - cnt
+        slot = torch.arange(r.numel(), device=dev) - start[c]
+        ids[c, slot], lv[c, slot], valid[c, slot] = r, v, True
+    return ids[:, :max(k, 1)], lv, valid
 
 
 class TorchWS(Solver):
@@ -661,6 +745,8 @@ class TorchWS(Solver):
         select = kw.pop("select", "min")
         cv_stop = kw.pop("cv_stop", (10, 0.05))      # None = full path for every fold
         cv_stop = tuple(cv_stop) if (cv_stop is not None and cv_stop != "none") else None
+        relax = kw.pop("relax", None)                # "cv": relaxed Lasso, ridge penalty chosen by CV
+        relax_grid = tuple(kw.pop("relax_grid", RELAX_GRID))
         Xd = HostX(X) if kw.get("stream_x") else torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32)).cuda()
         t_h2d = time.perf_counter() - t0
         masks = np.zeros((K, n), dtype=np.float32)
@@ -689,6 +775,47 @@ class TorchWS(Solver):
         thr = cv_mse[best_min, np.arange(T)] + se[best_min, np.arange(T)]
         best_1se = np.array([int(np.nonzero(cv_mse[:, t] <= thr[t])[0].min()) for t in range(T)])
         best = best_1se if select == "1se" else best_min
+        best_lasso = best
+        relax_info = None
+        if relax == "cv":
+            # relaxed Lasso with the refit ridge penalty chosen by CV: for every fold, alpha and channel, ridge
+            # refits on the fold model's support (fold training rows only) over `relax_grid` (relative to the
+            # mean support-Gram diagonal) plus the plain Lasso coefficients; (alpha, penalty) chosen jointly.
+            tr0 = time.perf_counter()
+            dev = torch.device("cuda")
+            Yd = torch.from_numpy(np.ascontiguousarray(Y, dtype=np.float32)).to(dev)
+            Lg = len(relax_grid)
+            mse_r = np.full((K, A, Lg + 1, T), np.inf)
+            mse_r[:, :, Lg, :] = mse
+            for fk in range(K):
+                rows, cols, vals, j = fold_trip[fk]
+                tr = torch.as_tensor(folds[fk][0], device=dev).long()
+                va = torch.as_tensor(folds[fk][1], device=dev).long()
+                for a in range(A):
+                    live = np.isfinite(mse[fk, a])
+                    if not live.any():
+                        continue
+                    ids, _, valid = _triplets_to_supports(rows[a], cols[a], vals[a], list(j * T + np.arange(T)), dev)
+                    _, vm = _support_ridge(Xd, Yd, tr, va, ids, valid, relax_grid)
+                    vm = vm.cpu().numpy()
+                    mse_r[fk, a, :Lg, :] = np.where(live[None, :], vm, np.inf)
+            with np.errstate(invalid="ignore"):
+                cvr = mse_r.mean(0)                                        # (A, L+1, T)
+                ser = mse_r.std(0, ddof=1) / np.sqrt(K)
+            flat = cvr.reshape(A * (Lg + 1), T)
+            bi = np.argmin(flat, axis=0)
+            ra_min, rl_min = bi // (Lg + 1), bi % (Lg + 1)
+            thr_r = cvr[ra_min, rl_min, np.arange(T)] + ser[ra_min, rl_min, np.arange(T)]
+            curve = cvr.min(1)                                             # (A, T) best penalty per alpha
+            ra_1se = np.array([int(np.nonzero(curve[:, t] <= thr_r[t])[0].min()) for t in range(T)])
+            rl_1se = np.array([int(np.argmin(cvr[ra_1se[t], :, t])) for t in range(T)])
+            ra, rl = (ra_1se, rl_1se) if select == "1se" else (ra_min, rl_min)
+            relax_info = dict(time_relax_cv_s=time.perf_counter() - tr0, grid=list(relax_grid),
+                              alpha_idx=ra.tolist(), penalty_idx=rl.tolist(),
+                              frac_no_refit=float(np.mean(rl == Lg)),
+                              penalty_idx_per_alpha=np.argmin(np.where(np.isfinite(cvr), cvr, np.inf), axis=1).tolist(),
+                              cv_mse_relaxed=np.where(np.isfinite(curve), curve, None).tolist())
+            best = ra
         fold_coefs = []
         for fk in range(K):
             rows, cols, vals, j = fold_trip[fk]
@@ -698,16 +825,48 @@ class TorchWS(Solver):
                 rr_.append(rows[a][m]); cc_.append(cols[a][m] % T); vv_.append(vals[a][m])
             fold_coefs.append(sp.csc_matrix((np.concatenate(vv_), (np.concatenate(rr_), np.concatenate(cc_))), shape=(p, T)))
         del fold_trip
-        amax = int(best.max())
+        stop = np.maximum(best, best_lasso)
+        amax = int(stop.max())
         rows, cols, vals, inf = _solve_batched(Xd, Y, np.ascontiguousarray(alphas[:amax + 1]), np.ones((1, n), np.float32),
-                                               self.tol, max_ep=self.max_iter, stop_after=best, extract_at=best, **kw)
-        coef = sp.csc_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(p, T))
+                                               self.tol, max_ep=self.max_iter, stop_after=stop,
+                                               extract_at=None if relax == "cv" else best, **kw)
+
+        def pick(at):
+            rr_, cc_, vv_ = [], [], []
+            for a_ in range(amax + 1):
+                m = at[cols[a_]] == a_
+                rr_.append(rows[a_][m]); cc_.append(cols[a_][m]); vv_.append(vals[a_][m])
+            return np.concatenate(rr_), np.concatenate(cc_), np.concatenate(vv_)
+        if relax == "cv":
+            r_l, c_l, v_l = pick(best_lasso)
+            coef_lasso = sp.csc_matrix((v_l, (r_l, c_l)), shape=(p, T))
+            tr1 = time.perf_counter()
+            r_r, c_r, v_r = pick(best)
+            dev = torch.device("cuda")
+            ids, lv, valid = _triplets_to_supports(r_r, c_r, v_r, list(range(T)), dev)
+            allrows = torch.arange(n, device=dev)
+            betas, _ = _support_ridge(Xd, Yd, allrows, None, ids, valid, relax_grid)
+            Lg = len(relax_grid)
+            rl_t = torch.as_tensor(rl, device=dev).long()
+            chosen = betas[rl_t.clamp(max=Lg - 1), torch.arange(T, device=dev)]          # (T, k)
+            chosen = torch.where((rl_t == Lg)[:, None], lv, chosen) * valid
+            tt = torch.arange(T, device=dev)[:, None].expand_as(ids)
+            coef = sp.csc_matrix((chosen[valid].cpu().numpy(), (ids[valid].cpu().numpy(), tt[valid].cpu().numpy())),
+                                 shape=(p, T))
+            relax_info["time_relax_final_s"] = time.perf_counter() - tr1
+            del Yd
+        else:
+            coef = sp.csc_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(p, T))
+            coef_lasso = coef
         del Xd
         torch.cuda.empty_cache()
         info = dict(fold_infos=infos, refit_info={k: v for k, v in inf.items() if k != "per_alpha"},
                     cv_batch=cv_batch, cv_stop=cv_stop, select=select, best_min=best_min.tolist(),
                     best_1se=best_1se.tolist(), time_h2d_s=t_h2d, time_total_inner_s=time.perf_counter() - t0)
-        return dict(coef=coef, best_idx=best, cv_mse=cv_mse, fold_coefs=fold_coefs, info=info)
+        if relax_info is not None:
+            info["relax"] = relax_info
+            info["best_lasso"] = best_lasso.tolist()
+        return dict(coef=coef, best_idx=best, cv_mse=cv_mse, fold_coefs=fold_coefs, info=info, coef_lasso=coef_lasso)
 
 
 SOLVERS = {"torch_ws": TorchWS}
