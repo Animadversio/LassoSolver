@@ -5,7 +5,10 @@
 Task P: one row per (solver, hardware, tol) run, plus per (solver, hardware) the time-to-loose / time-to-tight
 (fastest run whose max relative duality gap meets 1e-4 / 1e-6). Because the harness gap uses the simple
 rescaled-residual dual point, it can be pessimistic; "subopt" columns use the cached reference objective.
-Task CV: one row per run. Dev runs (max_targets set) and tagged 'dev' rows are excluded.
+Task CV: ranked by test R2 on reliable channels (spec v0.1), at tol 1e-4, grouped per hardware.
+Ranked rows must have their solver file committed at the row's git hash and not dirty (spec v0.1); other rows
+are listed as "unranked". Dev runs (max_targets set, tag 'dev') are excluded. Rows of a solver produced before
+a known bug fix (SUPERSEDED) are dropped.
 """
 from __future__ import annotations
 
@@ -37,12 +40,56 @@ def f(x, fmt="{:.3g}"):
     return fmt.format(x)
 
 
+# solver -> commit that fixed a bug invalidating earlier rows (rows from ancestors of it are dropped)
+SUPERSEDED = {"cpu_ridgecv": "0f359b3"}
+RANK_TOL = 1e-4
+TIER_NOTES = {"unit-100k": "64 channels (paul_20241119-20241122)", "unit-100k-raw": "64 channels",
+              "unit-800k": "383 channels (paul_241119-241122, same 1028 images)", "unit-800k-raw": "383 channels",
+              "pca1k": "64 channels", "pca1k-raw": "64 channels, unstandardized PCA scores"}
+_git_cache = {}
+
+
+def _git(*a):
+    import subprocess
+    k = a
+    if k not in _git_cache:
+        _git_cache[k] = subprocess.run(["git", "-C", REPO, *a], capture_output=True, text=True).returncode
+    return _git_cache[k]
+
+
+def _solver_files():
+    from lassobench.runner import discover_solvers
+    s, _ = discover_solvers()
+    return {k: v.__module__.replace(".", "/") + ".py" for k, v in s.items()}
+
+
+def committed(r, files):
+    f = files.get(r["solver"])
+    h = r.get("git_hash")
+    if not f or not h:
+        return False
+    if f in (r.get("git_dirty") or []):
+        return False
+    return _git("cat-file", "-e", f"{h}:{f}") == 0
+
+
+def superseded(r):
+    fix = SUPERSEDED.get(r["solver"])
+    if not fix or not r.get("git_hash"):
+        return False
+    return r["git_hash"].startswith(fix) is False and _git("merge-base", "--is-ancestor", r["git_hash"], fix) == 0 \
+        and _git("merge-base", "--is-ancestor", fix, r["git_hash"]) != 0
+
+
 def keep(r):
     return r.get("max_targets") is None and (r.get("tag") or "") != "dev"
 
 
 def build(rows=None):
-    rows = [r for r in (rows if rows is not None else read_results()) if keep(r)]
+    rows = [r for r in (rows if rows is not None else read_results()) if keep(r) and not superseded(r)]
+    files = _solver_files()
+    for r in rows:
+        r["_ranked"] = committed(r, files)
     by_tier = defaultdict(list)
     for r in rows:
         by_tier[r["tier"]].append(r)
@@ -54,7 +101,8 @@ def build(rows=None):
     for t in tiers:
         rs = by_tier[t]
         shape = rs[-1].get("shape", {})
-        out += [f"## {t}  (n={shape.get('n_train')}, p={shape.get('p')}, T={shape.get('T')})", ""]
+        note = TIER_NOTES.get(t, "")
+        out += [f"## {t}  (n={shape.get('n_train')}, p={shape.get('p')}, T={shape.get('T')})" + (f" - {note}" if note else ""), ""]
         P = [r for r in rs if r["task"] == "P"]
         if P:
             best = defaultdict(dict)
@@ -89,17 +137,31 @@ def build(rows=None):
             out += ["", "</details>", ""]
         CV = [r for r in rs if r["task"] == "CV"]
         if CV:
-            out += ["**Task CV** (5-fold CV over the 50-alpha grid, refit, test R2 on the held-out split)", "",
-                    "| solver | hardware | tol | status | time | test R2 mean | median | mean (reliable) | train R2 | nnz med | nnz mean | Jaccard vs ref | tag |",
-                    "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-            for r in sorted(CV, key=lambda r: (r["solver"], hw_label(r))):
+            hdr = ["| rank | solver | hardware | status | time (s) | test R2 reliable (mean) | reliable (median) | "
+                   "all-channel mean | train R2 | nnz med | Jaccard vs ref | git |",
+                   "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+
+            def line(rk, r):
                 m = r.get("metrics", {})
-                out.append(f"| {r['solver']} | {hw_label(r)} | {f(r['config'].get('tol'))} | {r['status']} | "
-                           f"{f(r.get('time_total_s'), '{:.1f}')} | {f(m.get('r2_test_mean'), '{:.4f}')} | "
-                           f"{f(m.get('r2_test_median'), '{:.4f}')} | {f(m.get('r2_test_mean_reliable'), '{:.4f}')} | "
-                           f"{f(m.get('r2_train_mean'), '{:.3f}')} | {f(m.get('nnz_median'), '{:.0f}')} | "
-                           f"{f(m.get('nnz_mean'), '{:.0f}')} | {f(m.get('jaccard_ref_mean'), '{:.3f}')} | {r.get('tag') or ''} |")
-            out.append("")
+                return (f"| {rk} | {r['solver']} | {hw_label(r)} | {r['status']} | {f(r.get('time_total_s'), '{:.1f}')} | "
+                        f"**{f(m.get('r2_test_mean_reliable'), '{:.4f}')}** | {f(m.get('r2_test_median_reliable'), '{:.4f}')} | "
+                        f"{f(m.get('r2_test_mean'), '{:.4f}')} | {f(m.get('r2_train_mean'), '{:.3f}')} | "
+                        f"{f(m.get('nnz_median'), '{:.0f}')} | {f(m.get('jaccard_ref_mean'), '{:.3f}')} | {(r.get('git_hash') or '')[:7]} |")
+            nrel = next((r["metrics"].get("n_reliable") for r in CV if r.get("metrics")), None)
+            out += [f"**Task CV** - 5-fold CV over the 50-alpha grid, refit, held-out test split. Ranked by test R2 over "
+                    f"reliable channels (reliability >= 0.5; {nrel} of {shape.get('T')}), tol {RANK_TOL:g}, per hardware.", ""]
+            ranked = [r for r in CV if r["_ranked"] and r.get("status") in ("ok", "timeout")
+                      and (r["config"].get("tol") is None or abs(r["config"]["tol"] - RANK_TOL) < 1e-12 or "ridge" in r["solver"])]
+            by_hw = defaultdict(list)
+            for r in ranked:
+                by_hw[hw_label(r)].append(r)
+            for hw in sorted(by_hw):
+                g = sorted(by_hw[hw], key=lambda r: -(r.get("metrics", {}).get("r2_test_mean_reliable") or -1e9))
+                out += [f"*{hw}*", ""] + hdr + [line(i + 1, r) for i, r in enumerate(g)] + [""]
+            rest = [r for r in CV if r not in ranked]
+            if rest:
+                out += ["<details><summary>Unranked CV rows (uncommitted solver code, other tol, errors)</summary>", ""] + hdr + \
+                       [line("-", r) for r in sorted(rest, key=lambda r: (r["solver"], hw_label(r)))] + ["", "</details>", ""]
     os.makedirs(os.path.dirname(LB), exist_ok=True)
     with open(LB, "w") as fh:
         fh.write("\n".join(out) + "\n")
@@ -118,7 +180,8 @@ def plot_tier(tier, rs):
     for r in P:
         groups[(r["solver"], hw_label(r))].append(r)
     solvers = sorted({k[0] for k in groups})
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), sharex=True)
+    hws = sorted({k[1] for k in groups})
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), sharex=True)
     for ax, (key, lab) in zip(axes, (("gap_rel_max", "max relative duality gap"),
                                      ("subopt_rel_max", "max relative suboptimality vs reference"))):
         any_pts = False
@@ -130,19 +193,26 @@ def plot_tier(tier, rs):
             any_pts = True
             c = PALETTE[solvers.index(k[0]) % len(PALETTE)]
             ls = "-" if "cpu" not in k[0] else "--"
-            ax.plot(*zip(*pts), ls, marker="o", ms=5, lw=2, color=c, label=f"{k[0]} ({k[1]})")
+            mk = "osD^v"[hws.index(k[1]) % 5]
+            ax.plot(*zip(*pts), ls, marker=mk, ms=6, lw=2, color=c, label=f"{k[0]} ({k[1]})")
         for thr, name in ((1e-4, "loose"), (1e-6, "tight")):
             ax.axhline(thr, color="#888", lw=0.8, ls=":")
-            ax.text(ax.get_xlim()[0] if any_pts else 1, thr, f" {name}", va="bottom", fontsize=8, color="#555")
+            ax.text(0.01, thr, f"{name} ", va="bottom", ha="left", fontsize=8, color="#555",
+                    transform=ax.get_yaxis_transform())
         ax.set_xscale("log"); ax.set_yscale("log")
         ax.set_xlabel("wall-clock time (s)"); ax.set_ylabel(lab)
         ax.grid(True, which="major", color="#ddd", lw=0.6)
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)
-    axes[0].legend(fontsize=7, frameon=False, loc="best")
+    if not any(r["metrics"].get("subopt_rel_max") is not None for r in P):
+        axes[1].text(0.5, 0.5, "no reference solution cached yet", ha="center", va="center",
+                     transform=axes[1].transAxes, color="#555")
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, fontsize=7, frameon=False, loc="lower center", ncol=min(4, max(1, len(l))))
     shp = P[-1]["shape"]
     fig.suptitle(f"{tier}: time vs accuracy, Task P (n={shp['n_train']}, p={shp['p']}, T={shp['T']})", fontsize=11)
-    fig.tight_layout()
+    nrow = (len(groups) + 3) // 4
+    fig.tight_layout(rect=(0, 0.06 * nrow + 0.02, 1, 0.95))
     os.makedirs(FIG, exist_ok=True)
     path = os.path.join(FIG, f"time_vs_subopt_{tier}.png")
     fig.savefig(path, dpi=130)

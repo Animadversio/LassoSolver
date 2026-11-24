@@ -363,7 +363,9 @@ def run(solver_name, tier_name, task="P", solver_args=None, timeout=None, warmup
                 raw["subopt_rel"] = q["subopt_rel"]
         else:
             ba = result.get("best_idx")
-            per, s = ev.cv_quality(tier, result["coef"], ba, result.get("alphas", alphas), ref=ref)
+            own_grid = result.get("alphas") is not None  # solver used its own grid (e.g. ridge): no Jaccard vs ref
+            per, s = ev.cv_quality(tier, result["coef"], ba, result.get("alphas", alphas),
+                                   ref=None if own_grid else ref)
             row["metrics"] = s
             row["solver_info"] = _small(result.get("info", {}))
             raw.update({k: v for k, v in per.items()})
