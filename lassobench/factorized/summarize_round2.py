@@ -106,7 +106,7 @@ def pair_stats(runs, chans, shape, kind):
             acc["wcos"].append(cos(Wa, Wb))
             sa, sb = Wa != 0, Wb != 0
             u = (sa | sb).sum()
-            dense = sa.all() and sb.all()                                # Ridge: support is everything
+            dense = sa.mean() > 0.9 and sb.mean() > 0.9                  # Ridge / nuclear: dense, no support
             acc["jaccard"].append((sa & sb).sum() / u if u and not dense else np.nan)
             acc["predcorr"].append(pcorr(a["pred"][:, t:t + 1], b["pred"][:, t:t + 1])[0])
         for k in out:
@@ -265,6 +265,7 @@ def main(argv=None):
     ap.add_argument("--tier", required=True)
     ap.add_argument("--dir", default="round2")
     ap.add_argument("--write-rows", action="store_true")
+    ap.add_argument("--tag", default="factorized-readout-round2")
     a = ap.parse_args(argv)
     od = os.path.join(OUT_DIR, a.tier, a.dir)
     T0 = time.perf_counter()
@@ -325,7 +326,7 @@ def main(argv=None):
         json.dump(summ, f, indent=1, default=float)
     figures(a.tier, ks, per, summ)
     if a.write_rows:
-        write_rows(a.tier, rows, summ, meta0)
+        write_rows(a.tier, rows, summ, meta0, tag=a.tag, raw_dir=od)
 
 
 def figures(tier, ks, per, summ):
@@ -368,7 +369,7 @@ def figures(tier, ks, per, summ):
     fig.savefig(os.path.join(FIG, f"{tier}_round2_stability.png"), dpi=130)
 
 
-def write_rows(tier, rows, summ, meta0):
+def write_rows(tier, rows, summ, meta0, tag="factorized-readout-round2", raw_dir=None):
     from lassobench import runner
     hw = (meta0 or {}).get("hardware")
     for name, lab, *_ in SPLIT_MODELS + MEMBER_MODELS:
@@ -393,9 +394,10 @@ def write_rows(tier, rows, summ, meta0):
                         m[f"stab_{src}_{kk}"] = s[kk]
         row = dict(run_id=time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6],
                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S"), task="CV", solver=f"fact_r2_{name}", tier=tier,
-                   tag="factorized-readout-round2", config=dict(label=lab, protocol="round2 (see round2.py)"),
+                   tag=tag, config=dict(label=lab, protocol="round2 (see round2.py)",
+                                        clip_test=bool((meta0 or {}).get("clip_test", False))),
                    hardware=hw, git_hash=(meta0 or {}).get("git_hash"), git_dirty=(meta0 or {}).get("git_dirty"),
-                   status="ok", metrics=m, raw=os.path.join(OUT_DIR, tier, "round2"))
+                   status="ok", metrics=m, raw=raw_dir or os.path.join(OUT_DIR, tier, "round2"))
         runner.append_row(row)
     print(f"wrote {sum(n in rows for n, *_ in SPLIT_MODELS + MEMBER_MODELS)} rows")
 
