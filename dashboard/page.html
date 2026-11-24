@@ -40,7 +40,7 @@
 
   <section id="time">
     <h2>Time for a full cross-validated fit, by solver</h2>
-    <p class="ls-muted">Wall-clock seconds on a log scale, shorter is better. Runs are grouped by dataset tier and number of channels fitted, so bars in one group are comparable.</p>
+    <p class="ls-muted">Wall-clock seconds on a log scale, shorter is better. Runs are grouped by dataset tier and number of channels fitted, so bars in one group are comparable. Unit-basis tiers come first: they are the target; the PCA tiers are only a check against the old notebooks.</p>
     <div class="ls-legend"><span class="ls-key"><span class="ls-swatch" data-draw="sw-cpu"></span>CPU</span><span class="ls-key"><span class="ls-swatch" data-draw="sw-gpu"></span>GPU</span></div>
     <div class="ls-chart dash-skeleton" id="time-chart" data-draw="time-chart" data-source="results"></div>
   </section>
@@ -98,6 +98,8 @@ dash.draw('time-chart', (el) => {
   if (!rows.length) { el.textContent = 'No timed runs yet.'; return; }
   const groups = d3.groups(rows, (d) => d.tier + ' · ' + d.targets + (d.targets === 1 ? ' channel' : ' channels'));
   groups.forEach(([, rs]) => rs.sort((a, b) => a.time_s - b.time_s));
+  const rank = (k) => (k.startsWith('unit') ? 0 : k.startsWith('syn') ? 1 : k.startsWith('pca1k-old') ? 3 : 2);
+  groups.sort((a, b) => rank(a[0]) - rank(b[0]) || d3.ascending(a[0], b[0]));
   const W = Math.max(280, el.clientWidth), rowH = 38, groupH = 30, axisH = 28, valueW = 64;
   const H = groups.length * groupH + rows.length * rowH + axisH + 6;
   const lo = Math.min(0.1, d3.min(rows, (d) => d.time_s) / 2), hi = d3.max(rows, (d) => d.time_s) * 1.2;
@@ -161,7 +163,8 @@ dash.draw('results-body', (tb) => {
   tb.replaceChildren();
   if (g.status === 'loading') return;
   if (g.status !== 'ok') { failRow(tb, 10, g.status === 'error' ? 'The results failed to load.' : '—'); return; }
-  const rows = [...g.data].sort((a, b) => d3.ascending(a.tier, b.tier) || d3.descending(a.targets, b.targets) || d3.ascending(a.time_s, b.time_s));
+  const rank = (k) => (k.startsWith('unit') ? 0 : k.startsWith('syn') ? 1 : k.startsWith('pca1k-old') ? 3 : 2);
+  const rows = [...g.data].sort((a, b) => rank(a.tier) - rank(b.tier) || d3.ascending(a.tier, b.tier) || d3.descending(a.targets, b.targets) || d3.ascending(a.time_s, b.time_s));
   for (const d of rows) {
     const tr = tb.insertRow(); tr.dataset.key = encodeURIComponent(d.id);
     cell(tr, d.tier); cell(tr, d.solver, 'ls-wide'); cell(tr, d.hardware);

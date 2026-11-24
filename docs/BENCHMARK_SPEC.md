@@ -90,3 +90,11 @@ dict the harness discovers (`SOLVERS = {"name": Class}` at module level). Helper
   `git_hash` (not listed in `git_dirty`). Dev runs are welcome in `results.jsonl` but are not ranked.
 - **Like-for-like comparisons.** Rank at a fixed tolerance (relative gap 1e-4) on the same hardware, and always
   include at least one CPU reference (sklearn CD or celer) on the same tier, or its recorded timeout.
+
+## 8. Priorities (user direction, 2026-11-23)
+
+- **The deliverable is Lasso in the unit basis.** `unit-100k`, `unit-800k` (and their `-raw` variants, then `unit-xl`)
+  are the tiers that matter; leaderboard, reports and solver tuning are judged there first.
+- `pca1k` / `pca1k-raw` are a correctness and regression check against the old notebooks only. Do not spend
+  tuning effort on small-p performance, and do not headline PCA numbers.
+- Headline statistical metric stays test R2 over reliable channels (section 7).
