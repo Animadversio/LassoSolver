@@ -23,7 +23,7 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-OLD = "/n/home12/binxuwang/Github/Closed-loop-visual-insilico"
+OLD = os.environ.get("LASSOBENCH_OLD_REPO", "/n/home12/binxuwang/Github/Closed-loop-visual-insilico")  # feature loaders
 sys.path.insert(1, OLD)
 
 from lassobench.api import STORE  # noqa: E402
