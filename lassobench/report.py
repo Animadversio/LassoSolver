@@ -124,7 +124,7 @@ def _g(d, *ks):
 def analysis_section(t, an):
     """Round-2 (spec section 9) table: sparsity frontier, stability, 1-SE, relaxed refit, vs Ridge."""
     from lassobench.evaluate import BUDGETS
-    o = [f"## Round 2 - sparse readout quality on {t}", "",
+    o = [f"**Round 2: sparse readout quality ({t})**", "",
          "Reliable channels only. min = min-CV alpha, 1se = one-standard-error alpha. J-folds = mean pairwise support "
          "Jaccard across the 5 CV fits at the chosen alpha; J-halves = Jaccard between fits on two disjoint halves of "
          "the training images. relaxed = ridge refit on the support with the penalty chosen by CV over the whole "
@@ -239,14 +239,13 @@ def build(rows=None):
             for hw in sorted(by_hw):
                 g = sorted(by_hw[hw], key=lambda r: -(r.get("metrics", {}).get("r2_test_mean_reliable") or -1e9))
                 out += [f"*{hw}*", ""] + hdr + [line(i + 1, r) for i, r in enumerate(g)] + [""]
+            an = [r for r in CV if r.get("analysis") and r.get("status") == "ok"]
+            if an:
+                out += analysis_section(t, an)
             rest = [r for r in CV if r not in ranked]
             if rest:
                 out += ["<details><summary>Unranked CV rows (uncommitted solver code, other tol, errors)</summary>", ""] + hdr + \
                        [line("-", r) for r in sorted(rest, key=lambda r: (r["solver"], hw_label(r)))] + ["", "</details>", ""]
-    for t in tiers:
-        an = [r for r in by_tier[t] if r.get("analysis") and r.get("status") == "ok"]
-        if an:
-            out += analysis_section(t, an)
     os.makedirs(os.path.dirname(LB), exist_ok=True)
     with open(LB, "w") as fh:
         fh.write("\n".join(out) + "\n")
