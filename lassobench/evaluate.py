@@ -210,6 +210,23 @@ def _jac(a, b):
     return 1.0 if u == 0 else len(a & b) / u
 
 
+def feature_map_ids(tier):
+    """Tier column -> feature-map (channel) index for unit-basis tiers (meta feature_shape + kept_columns.npy)."""
+    import os
+    shp = tier.meta.get("feature_shape")
+    kc = os.path.join(tier.path, "kept_columns.npy")
+    if not shp or not os.path.exists(kc):
+        return None
+    return np.load(kc) // int(np.prod(shp[1:]))
+
+
+def _pack_sets(name, sets):
+    """List of index sets -> two flat arrays (values, offsets) for npz storage."""
+    vals = [np.array(sorted(s), dtype=np.int64) for s in sets]
+    off = np.cumsum([0] + [v.size for v in vals])
+    return {f"{name}_idx": np.concatenate(vals) if vals else np.zeros(0, np.int64), f"{name}_off": off}
+
+
 def select_alphas(fold_mse):
     """fold_mse (K, A, T) -> (best_min, best_1se, mean, se). Index 0 = largest alpha (sparsest)."""
     K = fold_mse.shape[0]
@@ -341,6 +358,7 @@ def cv_analysis(tier, alphas, fold_paths, path, folds, half_paths=None, ridge=No
         S["ridge_r2_reliable"] = _rel_stats(ridge["r2"], rel)["mean"]
     cols = np.arange(T)
     Cabs = abs_corr(X, Y)
+    gmap = feature_map_ids(tier)   # tier column -> feature-map (channel) id, or None
     for rule, b in (("min", bmin), ("1se", b1)):
         sup = [_support(path[b[t]], t) for t in range(T)]
         r2 = r2_path[b, cols]
@@ -352,9 +370,20 @@ def cv_analysis(tier, alphas, fold_paths, path, folds, half_paths=None, ridge=No
         d["jaccard_folds_reliable"] = _rel_stats(jf, rel)
         per[f"jaccard_folds_{rule}"] = jf
         if half_paths is not None:
-            jh = np.array([_jac(_support(half_paths[0][b[t]], t), _support(half_paths[1][b[t]], t)) for t in range(T)])
+            h0 = [_support(half_paths[0][b[t]], t) for t in range(T)]
+            h1 = [_support(half_paths[1][b[t]], t) for t in range(T)]
+            jh = np.array([_jac(h0[t], h1[t]) for t in range(T)])
             d["jaccard_halves_reliable"] = _rel_stats(jh, rel)
             per[f"jaccard_halves_{rule}"] = jh
+            per.update(_pack_sets(f"sup_half0_{rule}", h0)); per.update(_pack_sets(f"sup_half1_{rule}", h1))
+            if gmap is not None:  # same question at the feature-map level: is the *channel* identifiable?
+                g = lambda S: set(gmap[np.array(sorted(S), dtype=np.int64)].tolist()) if S else set()
+                jg = np.array([_jac(g(h0[t]), g(h1[t])) for t in range(T)])
+                d["jaccard_halves_maps_reliable"] = _rel_stats(jg, rel)
+                jgf = np.array([np.mean([_jac(g(_support(fold_paths[i][b[t]], t)), g(_support(fold_paths[j][b[t]], t)))
+                                         for i in range(K) for j in range(i + 1, K)]) for t in range(T)])
+                d["jaccard_folds_maps_reliable"] = _rel_stats(jgf, rel)
+        per.update(_pack_sets(f"sup_full_{rule}", sup))
         tc = topcorr_frac(X, Y, sup, C=Cabs)
         d["topcorr_frac_reliable"] = _rel_stats(tc, rel)
         for mode in ("ols", "ridge"):   # naive: penalty / support chosen on the same rows -> optimistic-biased fit

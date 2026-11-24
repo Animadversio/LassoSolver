@@ -110,6 +110,7 @@ def main():
         meta = neural_meta(nd, tr, te)
         meta.update(model="resnet50_robust", layer=f".{stage}.Bottleneck{blk}", features="unit basis (flattened C,H,W)",
                     n_features_raw=int(X.shape[1]), n_features_kept=int(keep.sum()),
+                    feature_shape={"layer4": [2048, 7, 7], "layer1": [256, 56, 56]}[stage],
                     n_constant_dropped=int((~keep).sum()), image_source=PCA_PKL, y_mean=ymu, y_std=ysd,
                     sanity_pc_corr_layer4B0=pc_corr, x_standardized=not raw_tier,
                     x_scaling=("centered, one global scale %.6g" % sd[keep][0]) if raw_tier else "z-score per column", frac_zero_entries=float(np.mean(np.asarray(X[tr]) == 0)))
