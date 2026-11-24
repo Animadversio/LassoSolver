@@ -56,6 +56,14 @@ def main():
     coefs = res.coefs
     q = ev.path_quality(X, Y, coefs, alphas)
     print("gap_rel max/median", q["gap_rel"].max(), np.median(q["gap_rel"]), flush=True)
+    # provisional reference right away (polish can take hours at p >= 1e5 and jobs get preempted)
+    base = dict(tier=a.tier, solver=a.solver, tol=a.tol, target_gap=a.target_gap, n_alphas=runner.N_ALPHAS,
+                alpha_eps=runner.ALPHA_EPS, hardware=runner.hardware_info(), **runner.git_info(),
+                solver_info=runner._small(res.info), time_first_solve_s=t_solve)
+    ev.save_reference(a.tier, coefs, alphas, q, dict(base, stage="celer (unpolished)", time_total_s=t_solve,
+                                                     gap_rel_max=float(q["gap_rel"].max()),
+                                                     gap_rel_median=float(np.median(q["gap_rel"]))))
+    print("saved provisional reference", flush=True)
     n_pol = []
     target = a.target_gap
     for r in range(a.polish_rounds):
@@ -70,10 +78,8 @@ def main():
         print("polish", n_pol[-1], flush=True)
         target /= 10
     t_tot = time.perf_counter() - t0
-    info = dict(tier=a.tier, solver=a.solver, tol=a.tol, target_gap=a.target_gap, time_total_s=t_tot,
-                time_first_solve_s=t_solve, polish=n_pol, gap_rel_max=float(q["gap_rel"].max()),
-                gap_rel_median=float(np.median(q["gap_rel"])), n_alphas=runner.N_ALPHAS, alpha_eps=runner.ALPHA_EPS,
-                hardware=runner.hardware_info(), **runner.git_info(), solver_info=runner._small(res.info))
+    info = dict(base, stage="polished" if n_pol else "celer", time_total_s=t_tot, polish=n_pol,
+                gap_rel_max=float(q["gap_rel"].max()), gap_rel_median=float(np.median(q["gap_rel"])))
     ev.save_reference(a.tier, coefs, alphas, q, info)
     print(f"saved reference for {a.tier}: gap_rel max {info['gap_rel_max']:.3g}, total {t_tot:.1f}s", flush=True)
 
