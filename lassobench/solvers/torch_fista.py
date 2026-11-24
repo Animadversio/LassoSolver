@@ -38,7 +38,7 @@ class TorchFISTA(Solver):
 
     def __init__(self, tol=1e-4, max_iter=10000, dtype="float32", tf32=False, segments=1, restart=True,
                  check_every=10, mem_frac=0.85, max_batch=None, profile=False, verbose=False,
-                 fused=True, screen=False, screen_max_frac=0.5, cuda_graph=False, tol_margin=0.5, device=None,
+                 fused=True, screen=False, screen_max_frac=0.5, cuda_graph=False, tol_margin=0.8, device=None,
                  **kw):
         super().__init__(tol=tol, max_iter=max_iter, **kw)
         self.dtype = dtype
