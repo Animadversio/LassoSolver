@@ -113,6 +113,57 @@ def edge(r):
     return f"{np.mean(bi == A - 1):.2f} / {np.mean(bi == 0):.2f}"
 
 
+def _g(d, *ks):
+    for k in ks:
+        if not isinstance(d, dict) or k not in d:
+            return None
+        d = d[k]
+    return d
+
+
+def analysis_section(t, an):
+    """Round-2 (spec section 9) table: sparsity frontier, stability, 1-SE, relaxed refit, vs Ridge."""
+    from lassobench.evaluate import BUDGETS
+    o = [f"## Round 2 - sparse readout quality on {t}", "",
+         "Reliable channels only. min = min-CV alpha, 1se = one-standard-error alpha. J-folds = mean pairwise support "
+         "Jaccard across the 5 CV fits at the chosen alpha; J-halves = Jaccard between fits on two disjoint halves of "
+         "the training images. relaxed = ridge refit on the support with the penalty chosen by CV over the whole "
+         "select-then-refit procedure. Frontier: CV-best path point with <= k nonzeros (Lasso) or top-k |w| truncation "
+         "(dense). Analysis time is untimed extra work, not part of the solver time.", "",
+         "| solver | hardware | time (s) | Ridge ref | R2 min | nnz min | J-folds min | J-halves min | relaxed min | "
+         "R2 1se | nnz 1se | J-folds 1se | J-halves 1se | relaxed 1se | top-corr frac 1se | "
+         + " | ".join(f"k={k}" for k in BUDGETS) + " |",
+         "|" + "---|" * (15 + len(BUDGETS))]
+    for r in sorted(an, key=lambda r: r["solver"]):
+        a = r["analysis"]
+        if "min" in a:
+            fr = [_g(a, "frontier_path", str(k), "r2_reliable") for k in BUDGETS]
+            cells = [f(_g(a, "ridge_r2_reliable"), "{:.3f}")]
+            for rule in ("min", "1se"):
+                cells += [f(_g(a, rule, "r2_reliable", "mean"), "{:.3f}"), f(_g(a, rule, "nnz_reliable", "mean"), "{:.0f}"),
+                          f(_g(a, rule, "jaccard_folds_reliable", "mean"), "{:.2f}"),
+                          f(_g(a, rule, "jaccard_halves_reliable", "mean"), "{:.2f}"),
+                          f(_g(a, rule, "relaxed_cv_r2_reliable", "mean"), "{:.3f}")]
+            cells.append(f(_g(a, "1se", "topcorr_frac_reliable", "mean"), "{:.2f}"))
+        else:  # dense method: top-k truncation frontier, halves stability of its top-k supports
+            fr = [_g(a, "frontier_topk_own", str(k), "trunc_r2_reliable") for k in BUDGETS]
+            jh = _g(a, "ridge_topk_jaccard_halves", "100", "mean")
+            cells = [f(_g(a, "ridge_r2_reliable"), "{:.3f}"), f(_g(a, "own_r2_reliable"), "{:.3f}"), "dense", "-",
+                     f"{f(jh, '{:.2f}')} (top-100)", "-", "-", "-", "-", "-", "-", "-"]
+        o.append(f"| {r['solver']} | {hw_label(r)} | {f(r.get('time_total_s'), '{:.1f}')} | " + " | ".join(cells) + " | "
+                 + " | ".join(f(x, "{:.3f}") for x in fr) + " |")
+    o += ["", "Dense-method top-k with a CV-honest ridge refit on the top-k support (R2 reliable): "]
+    for r in an:
+        a = r["analysis"]
+        fk = _g(a, "frontier_topk_own") or _g(a, "frontier_topk_ridge")
+        if fk:
+            o.append(f"- {r['solver']} ({hw_label(r)}): " + ", ".join(
+                f"k={k}: trunc {f(_g(fk, str(k), 'trunc_r2_reliable'), '{:.3f}')} / refit "
+                f"{f(_g(fk, str(k), 'refit_cv_r2_reliable'), '{:.3f}')}" for k in BUDGETS))
+    o.append("")
+    return o
+
+
 def build(rows=None):
     rows = [remap_tier(r) for r in (rows if rows is not None else read_results()) if keep(r) and not superseded(r)]
     files = _solver_files()
@@ -192,6 +243,10 @@ def build(rows=None):
             if rest:
                 out += ["<details><summary>Unranked CV rows (uncommitted solver code, other tol, errors)</summary>", ""] + hdr + \
                        [line("-", r) for r in sorted(rest, key=lambda r: (r["solver"], hw_label(r)))] + ["", "</details>", ""]
+    for t in tiers:
+        an = [r for r in by_tier[t] if r.get("analysis") and r.get("status") == "ok"]
+        if an:
+            out += analysis_section(t, an)
     os.makedirs(os.path.dirname(LB), exist_ok=True)
     with open(LB, "w") as fh:
         fh.write("\n".join(out) + "\n")
