@@ -16,6 +16,11 @@ Warm starts down the path; the final check of alpha a is the first check of alph
 CV folds are extra problems that share X: fold f = row mask m_f, its own union Gram (downdate is
 just a masked matmul on the incremental columns), residuals zeroed off-fold. `fit_cv_batched`
 solves all K folds + the full refit path in one pass.
+
+`positive=True` solves the nonnegative Lasso (every weight >= 0), as sklearn's `positive=True`: the
+CD kernels keep only the positive branch of the soft threshold, and the gap, the strong rule and the
+working-set candidates use the signed correlation x_j^T r (one-sided dual constraint). Plain Lasso
+only: it is not combined with `l1_ratio < 1` or with the relaxed (ridge-refit) options.
 """
 from __future__ import annotations
 
@@ -104,21 +109,22 @@ class _Union:
         return m
 
 
-def _restricted_gap(c, q, w, lam, yy):
+def _restricted_gap(c, q, w, lam, yy, positive=False):
     cw = (c * w).sum(1)
     qw = (q * w).sum(1)
     l1 = w.abs().sum(1)
-    qm = q.abs().max(1).values
+    qm = q.max(1).values.clamp(min=0) if positive else q.abs().max(1).values
     rr, ry = yy - cw - qw, yy - cw
     return gap_from_stats(rr, ry, l1, qm, lam, yy)
 
 
-def _polish(un, fa, pos, valid, cmat, w, lam, yy, chunk_bytes=2 ** 30):
+def _polish(un, fa, pos, valid, cmat, w, lam, yy, chunk_bytes=2 ** 30, positive=False):
     """Active-set Newton step on the current sign pattern, batched (in place on w).
 
     For A = supp(w), s = sign(w): x_A = G_AA^{-1} (c_A - lam s_A). Move from w toward x up to the first
     sign change (the objective restricted to the orthant is a quadratic minimized at x, so every such
     step decreases it). If no sign flips, this is the exact restricted solution on A.
+    With `positive` the step is the same (w >= 0 on entry stays >= 0); only the gap is one-sided.
     Returns the restricted relative duality gap after the step.
     """
     B, K = w.shape
@@ -146,7 +152,7 @@ def _polish(un, fa, pos, valid, cmat, w, lam, yy, chunk_bytes=2 ** 30):
         wn = torch.where(flip & (tj <= t[:, None] * (1 + 1e-12)), torch.zeros_like(wn), wn)
         wn = wn * Am
         q = cb - (G @ wn[..., None])[..., 0]
-        g_new = _restricted_gap(cb, q * v, wn, lb, yy[sl])
+        g_new = _restricted_gap(cb, q * v, wn, lb, yy[sl], positive)
         w[sl] = wn
         gap[sl] = g_new
     return gap
@@ -169,7 +175,7 @@ def _problem_grams(un, fa, pos, valid, chunk_bytes=2 ** 31, dtype=None):
     return G.view(-1), goff, K, idx[None, :].expand(B, K)
 
 
-def _fista_restricted(G, c, w, lam, yy, tol_in, max_it, check_every=10):
+def _fista_restricted(G, c, w, lam, yy, tol_in, max_it, check_every=10, positive=False):
     """Batched FISTA (gradient restart) on restricted problems 0.5 w'Gw - c'w + lam|w|_1.
 
     G (b, K, K), c/w (b, K) in G's dtype. All problems advance together with one bmm per iteration;
@@ -196,7 +202,7 @@ def _fista_restricted(G, c, w, lam, yy, tol_in, max_it, check_every=10):
         Gy = torch.bmm(G, y[:, :, None])[:, :, 0]
         z = y - (Gy - cd) / L[:, None]
         th = (lamd / L)[:, None]
-        xn = torch.sign(z) * torch.clamp(z.abs() - th, min=0)
+        xn = torch.clamp(z - th, min=0) if positive else torch.sign(z) * torch.clamp(z.abs() - th, min=0)
         rst = ((y - xn) * (xn - x)).sum(1) > 0
         tn = torch.where(rst, torch.ones_like(t), (1 + torch.sqrt(1 + 4 * t * t)) / 2)
         beta = torch.where(rst, torch.zeros_like(t), (t - 1) / tn)
@@ -205,7 +211,7 @@ def _fista_restricted(G, c, w, lam, yy, tol_in, max_it, check_every=10):
         it += 1
         if it % check_every == 0 or it == max_it:
             q = cd - torch.bmm(G, x[:, :, None])[:, :, 0]
-            g = _restricted_gap(cd.double(), q.double(), x.double(), lam.double(), yy)
+            g = _restricted_gap(cd.double(), q.double(), x.double(), lam.double(), yy, positive)
             done = (g <= tol_in) | (it >= max_it)
             if done.any():
                 di = idx[done]
@@ -275,7 +281,7 @@ def _gather_grams(un, gview, fa, pos, valid, dtype):
 
 def _inner_solve(un, gview, fa, pos, valid, kk, cmat, dg, w, lam, yy, tol_in, max_ep, act_passes, polish,
                  cd_epochs0, tm, anderson=True, kernel=2, act_passes2=25, snap_every=5, inner="cd",
-                 fista_iters=3000, fista_dtype=torch.float32, fista_bytes=2 ** 33, l2=None):
+                 fista_iters=3000, fista_dtype=torch.float32, fista_bytes=2 ** 33, l2=None, positive=False):
     """Restricted solves: batched FISTA on dense restricted Grams (inner="fista", falls back to the CD
     kernel for problems it leaves unconverged) or the Gram-CD kernel (inner="cd"), optional Newton polish."""
     B = w.shape[0]
@@ -292,7 +298,8 @@ def _inner_solve(un, gview, fa, pos, valid, kk, cmat, dg, w, lam, yy, tol_in, ma
                 if l2 is not None:
                     ar = torch.arange(K, device=w.device)
                     G[:, ar, ar] += (l2[sl, None] * valid[sl]).to(G.dtype)
-                wn, it_, g = _fista_restricted(G, cmat[sl] * valid[sl], w[sl], lam[sl], yy[sl], tol_in[sl], fista_iters)
+                wn, it_, g = _fista_restricted(G, cmat[sl] * valid[sl], w[sl], lam[sl], yy[sl], tol_in[sl], fista_iters,
+                                               positive=positive)
                 del G
                 w[sl] = wn * valid[sl]
                 gap[sl] = g
@@ -306,7 +313,7 @@ def _inner_solve(un, gview, fa, pos, valid, kk, cmat, dg, w, lam, yy, tol_in, ma
                                       valid[sub_], kk[sub_], cmat[sub_], dg[sub_], w[sub_].contiguous(), lam[sub_],
                                       yy[sub_], tol_in[sub_], max_ep, act_passes, polish, cd_epochs0, tm, anderson,
                                       kernel, act_passes2, snap_every, inner="cd",
-                                      l2=l2[sub_] if l2 is not None else None)
+                                      l2=l2[sub_] if l2 is not None else None, positive=positive)
         w[sub_] = w2
         gap[sub_] = g2
         its[sub_] += ep2
@@ -333,7 +340,7 @@ def _inner_solve(un, gview, fa, pos, valid, kk, cmat, dg, w, lam, yy, tol_in, ma
                                         ws, lam[sub].contiguous(), yy[sub].contiguous(),
                                         tol_in[sub].contiguous(), max_ep=e,
                                         act_passes=act_passes if kernel == 1 else act_passes2,
-                                        anderson=anderson, **ex)
+                                        anderson=anderson, positive=positive, **ex)
                 w[sub] = ws
                 ep_tot[sub] += ep.long()
                 gap[sub] = g
@@ -343,7 +350,7 @@ def _inner_solve(un, gview, fa, pos, valid, kk, cmat, dg, w, lam, yy, tol_in, ma
         if polish > 0 and un.use_gram:
             with tm("inner_polish"):
                 ws = w[sub].contiguous()
-                g = _polish(un, fa[sub], pos[sub], valid[sub], cmat[sub], ws, lam[sub], yy[sub])
+                g = _polish(un, fa[sub], pos[sub], valid[sub], cmat[sub], ws, lam[sub], yy[sub], positive=positive)
                 w[sub] = ws
                 gap[sub] = g
                 npol += 1
@@ -359,14 +366,18 @@ def _solve_batched(X, Y, alphas, masks, tol, max_outer=100, min_ws=64, inner_rat
                    act_passes2=25, snap_every=5, stop_after=None, extract_at=None, val_mse=False,
                    tol_margin=0.9, gram_budget=None, ws_rule="celer", problem_gram_dtype="auto",
                    stream_x=False, inner="cd", fista_iters=3000, norm_score=True, cv_stop=None, l1_ratio=1.0,
-                   relax_gamma=None, relax_extract=True):
+                   relax_gamma=None, relax_extract=True, positive=False):
     """Core solver. X (n, p) numpy or CUDA tensor, Y (n, T) numpy; alphas (A, T); masks (F, n) {0,1}.
 
     Problems b = f * T + t. Returns per-alpha triplets (feature, problem, value) and info.
     stop_after: (B,) last alpha index to solve per problem (default all).
     extract_at: (B,) if given, only problem b's solution at alpha extract_at[b] is returned.
     val_mse: also return (A, B) held-out MSE on rows where mask == 0 (info["val_mse"]).
+    positive: nonnegative Lasso (w >= 0). Plain Lasso only.
     """
+    positive = bool(positive)
+    if positive and (l1_ratio < 1.0 or relax_gamma is not None):
+        raise ValueError("positive=True supports the plain Lasso only (not l1_ratio < 1 or relax_gamma)")
     warm_kernels()
     tm = Timer()
     t_start = time.perf_counter()
@@ -442,7 +453,8 @@ def _solve_batched(X, Y, alphas, masks, tol, max_outer=100, min_ws=64, inner_rat
                 corr = (un.ids[r_], c_, (l2c[c_] * Wsub[r_, c_]).float())
         with tm("full_corr"):
             st = full_corr_stats(Xd, Rt, M, thr=thr, chunk_bytes=chunk_bytes,
-                                 inv_norm=inv_norm if lam_c is not None else None, lam=lam_c, corr=corr)
+                                 inv_norm=inv_norm if lam_c is not None else None, lam=lam_c, corr=corr,
+                                 positive=positive)
         return rr, ry, l1, st
 
     # initial check at w = 0
@@ -535,7 +547,7 @@ def _solve_batched(X, Y, alphas, masks, tol, max_outer=100, min_ws=64, inner_rat
                                                    tol_in, max_ep, act_passes, polish, cd_epochs0, tm, anderson, kernel,
                                                    act_passes2, snap_every, inner, fista_iters,
                                                    getattr(torch, gram_dtype if tol < 1e-5 else "float32"),
-                                                   l2=l2_all[a][act] if enet else None)
+                                                   l2=l2_all[a][act] if enet else None, positive=positive)
             with tm("scatter"):
                 un.WU[:, act] = 0
                 bb = act[:, None].expand_as(pos)
@@ -733,6 +745,7 @@ class TorchWS(Solver):
                                minimum for 10 alphas (None/"none" = full path)
           l1_ratio=rho         elastic net (lam2 = alpha (1 - rho) / rho), relax_gamma=g  relaxed Lasso
                                (ridge refit on each support, CV on the refit error, refit coefs returned)
+          positive=True        nonnegative Lasso (w >= 0); not with l1_ratio < 1 or the relaxed options
         Returns also fold_coefs: K sparse (p, T) Lasso coefficient matrices at the selected alpha per target."""
         import scipy.sparse as sp
         t0 = time.perf_counter()
@@ -746,6 +759,8 @@ class TorchWS(Solver):
         cv_stop = kw.pop("cv_stop", (10, 0.05))      # None = full path for every fold
         cv_stop = tuple(cv_stop) if (cv_stop is not None and cv_stop != "none") else None
         relax = kw.pop("relax", None)                # "cv": relaxed Lasso, ridge penalty chosen by CV
+        if kw.get("positive") and relax is not None:
+            raise ValueError("positive=True supports the plain Lasso only (the ridge refit is unconstrained)")
         relax_grid = tuple(kw.pop("relax_grid", RELAX_GRID))
         Xd = HostX(X) if kw.get("stream_x") else torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32)).cuda()
         t_h2d = time.perf_counter() - t0
