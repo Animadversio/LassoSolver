@@ -1,0 +1,17 @@
+# Versions of the `torch2` conda env the benchmark was run with (Python 3.10.14, CUDA 12.0).
+# CPU baselines and the harness need the first block; GPU solvers need torch with CUDA, and torch_ws also cupy.
+numpy==2.0.2
+scipy==1.14.0
+scikit-learn==1.6.0
+celer==0.7.3
+joblib==1.4.2
+threadpoolctl==3.5.0
+psutil==6.0.0
+matplotlib==3.8.4
+h5py==3.12.0
+pytest==8.3.4
+# GPU solvers (install torch from the CUDA wheel index that matches your driver)
+torch==2.4.1
+cupy-cuda12x==13.3.0
+numba==0.60.0
+pynvml==11.4.1
