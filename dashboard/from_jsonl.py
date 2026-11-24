@@ -20,7 +20,7 @@ for line in open(here.parent / "tables" / "results.jsonl"):
     hw = gpu.replace("NVIDIA ", "") if gpu else f"{h['n_threads']} CPU threads"
     args = ", ".join(f"{k}={v}" for k, v in sorted(a.items()))
     f = lambda v, n: "" if v is None else f"{v:.{n}g}"
-    latest[(r["tier"], r["solver"], hw, args)] = dict(
+    latest[(r["tier"], r["shape"]["T"], r["solver"], hw, args)] = dict(
         tier=r["tier"], solver=r["solver"], hardware=hw, device="gpu" if gpu else "cpu", targets=str(r["shape"]["T"]),
         time_s=f(r["time_total_s"], 3), test_r2=f(m.get("r2_test_mean"), 3), test_r2_rel=f(m.get("r2_test_mean_reliable"), 3),
         nnz=f(m.get("nnz_mean"), 3), source="harness " + r["timestamp"][:10],
