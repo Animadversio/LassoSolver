@@ -73,18 +73,24 @@ Hardware: serial_requeue nodes, either Xeon Platinum 8268 (2.9 GHz) or 8358 (2.6
 | unit-100k | cpu_celer | 8358 x32 | 403 | 0.3257 | - | 120.5 | 18278e |
 | unit-100k | torch_ws (sibling, for comparison) | H200 | 33.2 | 0.3257 | - | 120.5 | 380482 |
 | unit-100k | cpu_ridgecv | 8268 x32 | 2.8 | **0.3468** | 0.1642 | dense | 42aace |
-| unit-100k-raw | cpu_celer (16 jobs) | 8268 x16 | 948 | 0.3159 | 0.1494 | 105 | d78efd |
+| unit-100k | cpu_sklearn_cd | 8358 x32 | 4651 | 0.3257 | 0.1571 | 120.5 | f8a76a |
+| unit-100k-raw | cpu_celer | 8358 x32 | 394 | 0.3159 | 0.1494 | 105 | d3c8bb |
 | unit-100k-raw | cpu_ridgecv | 8268 x32 | 3.7 | **0.3515** | 0.1668 | dense | a95b5f |
-| unit-800k | cpu_ridgecv | 8358 x32 | 10.3 | 0.1253 | 0.0572 | dense | b2a1b9 |
-| unit-800k-raw | cpu_ridgecv | 8358 x32 | 8.8 | 0.0757 | 0.0328 | dense | 7c1702 |
-| unit-800k | cpu_celer / cpu_sklearn_cd | 8358 x32 | running (4 h cap) | | | | jobs 63239467 / 63239490 |
-| unit-800k-raw | cpu_celer | 8358 x32 | running (4 h cap) | | | | job 63239509 |
-| unit-100k | cpu_sklearn_cd | 8358 x32 | running (4 h cap) | | | | job 63237091 |
+| unit-800k | cpu_celer | 8358 x32 | 2269 | 0.0391 | 0.0276 | 50 | 2e77c1 |
+| unit-800k | torch_ws (sibling) | H200 | 14.9 | 0.0326 | 0.0244 | 50 | 31824a |
+| unit-800k | cpu_ridgecv | 8358 x32 | 10.3 | **0.1253** | 0.0572 | dense | b2a1b9 |
+| unit-800k-raw | cpu_celer | 8358 x32 | 1815 | 0.0026 | -0.0047 | 2.5 | 1d0ba5 |
+| unit-800k-raw | cpu_ridgecv | 8358 x32 | 8.8 | **0.0757** | 0.0328 | dense | 7c1702 |
+| unit-800k | cpu_sklearn_cd | 8358 x32 | running (4 h cap) | | | | job 63239490 |
 | unit-800k-383 | cpu_celer / cpu_sklearn_cd / raw celer | 8358 x32 | running (4 h cap) | | | | jobs 63237102 / 63237105 / 63237109 |
 
-- celer and torch_ws pick the same alphas and reach the same test R2 to 4 decimals on unit-100k. This cross-checks both the GPU solver and the harness CV. CPU celer is 12x slower than torch_ws on an H200 there.
-- **Lasso vs Ridge in the unit basis: Ridge wins on layer4.** Reliable-channel R2 is 0.347 for Ridge vs 0.326 for Lasso on z-scored unit-100k, and 0.352 vs 0.316 on raw. Ridge also fits in 3 s.
-- Layer1 (unit-800k) predicts the cIT channels much worse than layer4 (Ridge 0.125 vs 0.347), as expected for an early layer.
+(The dev-node celer run on unit-100k-raw, 948 s at 16 jobs on a shared node, is superseded by d3c8bb.)
+Peak RAM: rows before commit d99cbe8 sum RSS over joblib workers, which counts the shared memmap of X once per
+worker (celer on unit-800k shows 172 GB). Later rows use PSS for workers.
+
+- On unit-100k, celer, sklearn CD and torch_ws pick the same alphas and reach the same test R2 to 4 decimals (0.3257). This cross-checks the GPU solver and the harness CV. CPU celer is 12x slower than torch_ws on an H200 (403 s vs 33 s), and sklearn CD 140x slower (4651 s).
+- **Lasso vs Ridge in the unit basis: Ridge wins everywhere.** Reliable-channel R2: 0.347 Ridge vs 0.326 Lasso on z-scored unit-100k, 0.352 vs 0.316 on raw. On layer1 (unit-800k) the gap is large: 0.125 vs 0.039 z-scored, 0.076 vs 0.003 raw. Ridge fits in 3-10 s.
+- Layer1 (unit-800k) predicts the cIT channels much worse than layer4 (Ridge 0.125 vs 0.347), as expected for an early layer. Lasso there mostly picks very few units (median 50 z-scored, 2.5 raw) and is barely predictive.
 
 ### Raw vs z-scored (spec v0.1, section 7)
 
@@ -92,12 +98,12 @@ Hardware: serial_requeue nodes, either Xeon Platinum 8268 (2.9 GHz) or 8358 (2.6
 |---|---|---|
 | PCA-1000 (pca1k) | 0.258 / 0.309 | 0.003 / 0.352 |
 | unit-100k (layer4) | 0.326 / 0.316 | 0.347 / 0.352 |
-| unit-800k (layer1) | pending | 0.125 / 0.076 |
+| unit-800k (layer1) | 0.039 / 0.003 | 0.125 / 0.076 |
 
 - On **PCA scores**, z-scoring is harmful. It inflates the ~900 low-variance (mostly noise) components to the same scale as the top components. Ridge, being isotropic, then cannot shrink them selectively and falls to R2 ~0: 25% of channels choose the largest ridge alpha, i.e. predict 0. Widening the ridge grid from 1e-6..1e4 to 1e-4..1e8 (relative) changed nothing. This is a property of z-scored PCA features, not a bug.
 - In the **unit basis** the effect is small and has no consistent sign at layer4 (Lasso +0.010 for z, Ridge +0.005 for raw). At layer1, z-scoring helps Ridge (0.125 vs 0.076). Raw unit features have very unequal column scales (post-ReLU, many near-dead units), so z-scoring up-weights rare-firing units there.
 - Sanity check of the raw-tier construction: Ridge is rotation invariant. Ridge on `unit-100k-raw` (0.3515) equals Ridge on `pca1k-raw` (0.3518) to 3 decimals, as it should: the PCA scores are a rotation of the same centered layer4 features.
-- **Recommendation:** keep z-scoring as the default for the unit-basis tiers (it is what the solvers are tuned for), and keep the `-raw` tiers as a required secondary report. Final call when the unit-800k Lasso rows land.
+- **Recommendation: z-score by default in the unit basis.** It is no worse at layer4 (Lasso slightly better, Ridge within 0.005) and clearly better at layer1 (Lasso 0.039 vs 0.003, Ridge 0.125 vs 0.076). Keep the `-raw` tiers as a secondary check. The PCA result does not transfer to the unit basis.
 
 ### Standardization and speed (pca1k, Platinum 8268 x32)
 
@@ -133,6 +139,45 @@ So "X was not standardized" was **not** the cause of the old slow fits. On PCA f
 - **CV-optimal Lasso solutions are very sparse:** median 34 (pca1k) to 120 (unit-100k) nonzeros out of 1e3-1e5 features. A sizeable minority of channels choose alpha_max, i.e. the empty model: 19% on unit-100k, 16-19% on pca1k, 28% on the 383-ch tier. **Every grid-edge hit is at the largest alpha, never at the smallest** (column "alpha at grid edge: smallest / largest" in the leaderboard), so the spec's eps = 1e-2 floor is not binding. Those channels are unpredictable, and the predict-zero choice is correct for them.
 - **Ridge beats Lasso in R2 on these data.** Sparsity costs about 0.02-0.04 R2 on the reliable channels at layer4. Lasso's value here is interpretability and compactness (120 vs 100,352 weights), not accuracy.
 - Lasso paths in the unit basis are expensive at the small-alpha end: Task P median nnz is ~510 on unit-100k at alpha_min, near n = 822.
+
+## Round 2: Lasso as a sparse readout (spec section 9)
+
+`--analysis` (Task CV) adds an untimed analysis phase (`runner.run_analysis`, `evaluate.cv_analysis`). It needs
+the 5 fold paths, the full-data path and two paths on disjoint halves of the training images (seeded split).
+The harness default CV now keeps the fold paths and refits the full path. For solvers with their own `fit_cv`
+(torch_ws, which early-stops folds and returns no fold coefficients) the paths are recomputed with `fit_path`.
+Everything is over the 20 reliable cIT channels.
+
+- **Selection rules:** min-CV alpha and the 1-SE alpha (largest alpha whose mean CV MSE is within one fold-SE of the minimum).
+- **Frontier:** for budget k, the CV-best point on each channel's path with <= k nonzeros (chosen by CV MSE, not by test R2), then test R2. Dense methods: top-k |w| truncation, with and without a refit.
+- **Stability:** support Jaccard across the 5 fold fits at the chosen alpha (mean over the 10 pairs), and between the two half-data fits. Also at the **feature-map level** (unit (c,h,w) -> channel c, using `feature_shape` in `meta.json` and `kept_columns.npy`). Plus the fraction of selected units in the top 1% of |corr(x_j, y)|.
+- **Relaxed refit:** a ridge refit on the support, **with the penalty chosen by CV over the whole select-then-refit procedure** (supports re-selected inside each fold). The naive version picks the penalty by GCV on the already-selected support. It overfits badly (top-100 ridge support on pca1k-raw: naive GCV chose a penalty ~50x below the test-optimal one, R2 0.14 vs 0.26 for plain truncation). It is reported only as `relaxed_*_naive` and should not be used.
+
+### Results (torch_ws on H200 for the paths; RidgeCV reference; reliable-channel means)
+
+| tier | Ridge | Lasso min-CV: R2 / nnz | 1-SE: R2 / nnz | frontier k=10 / 30 / 100 / 300 / 1000 | Ridge top-k + CV refit, k=10 / 30 / 100 / 300 / 1000 |
+|---|---|---|---|---|---|
+| unit-100k | 0.347 | 0.326 / 252 | 0.294 / 82 | 0.111 / 0.209 / 0.308 / 0.329 / 0.326 | 0.131 / 0.222 / 0.282 / 0.324 / 0.355 |
+| unit-100k-raw | 0.352 | 0.316 / 206 | 0.274 / 67 | 0.114 / 0.207 / 0.300 / 0.316 / 0.316 | 0.139 / 0.209 / 0.267 / 0.315 / 0.340 |
+| unit-800k | 0.125 | 0.033 / 176 | -0.068 / 17 | 0.009 / 0.033 / -0.057 / 0.039 / 0.033 | 0.009 / -0.193 / -0.001 / 0.037 / 0.051 |
+
+| tier, rule | J-folds (units) | J-halves (units) | J-folds (maps) | J-halves (maps) | top-1% |corr| frac | relaxed (CV) R2 |
+|---|---|---|---|---|---|---|
+| unit-100k, min | 0.15 | 0.007 | see note | see note | 0.40 | 0.326 |
+| unit-100k, 1se | 0.21 | 0.015 | see note | see note | 0.88 | 0.295 |
+| unit-100k-raw, min | 0.19 | 0.015 | 0.32 | 0.13 | 0.35 | 0.317 |
+| unit-100k-raw, 1se | 0.26 | 0.022 | 0.37 | 0.12 | 0.69 | 0.290 |
+| unit-800k, min | 0.09 | 0.001 | 0.43 | 0.34 | 0.78 | 0.038 |
+| unit-800k, 1se | 0.12 | 0.001 | 0.24 | 0.12 | 1.00 | -0.236 |
+| Ridge top-100, halves (reference) | | 0.028 (unit-100k), 0.039 (raw), 0.000 (800k) | | | | |
+
+Findings:
+
+1. **When does Lasso get within 0.02 R2 of Ridge?** On unit-100k at **k ~ 300** nonzeros per channel (frontier 0.329 vs Ridge 0.347; the realised mean nnz at that budget is 229). At k = 100 it is 0.039 below Ridge, at k = 30 0.14 below. On raw features it never gets within 0.02 (best 0.316 vs 0.352). On layer1 (unit-800k) Lasso is not a usable readout: no budget gets within 0.08 of Ridge.
+2. **Lasso beats top-k Ridge only at small k, and only slightly.** At k = 30-100, the Lasso frontier (0.209 / 0.308) is close to or above a Ridge fit truncated to its top-k weights and refit honestly (0.222 / 0.282). At k = 1000, refit top-k Ridge (0.355) slightly *beats full Ridge* (0.347). Plain truncation of Ridge without refit is useless (R2 0.00-0.11).
+3. **Supports are not stable at the unit level.** Two fits on disjoint halves of the images share 1-2% of their selected units (Jaccard 0.007-0.022), and the 5 CV folds (80% overlapping data) share 15-26%. The 1-SE rule is somewhat more stable than min-CV and much more concentrated on the most correlated units (88% in the top 1% |corr|), at a cost of 0.03 R2. Ridge's top-k units are equally unstable (halves Jaccard 0.01-0.04). So this is a property of the data (n = 822 images, strongly correlated neighbouring units), not of Lasso. **At the feature-map level, stability is much higher**: halves Jaccard 0.12-0.34 and fold Jaccard 0.24-0.43. Units of the same channel at nearby positions are interchangeable. Identifiability, if it exists at this n, is at the channel (and maybe coarse position) level.
+4. **Relaxed refit does not close the gap.** With an honestly CV-chosen penalty, ridge-on-support gives the same R2 as Lasso (0.326 vs 0.326 min-CV, 0.295 vs 0.294 1-SE). The Lasso-vs-Ridge gap is lost features, not shrinkage bias. Unpenalized OLS refits are much worse (0.18-0.24).
+5. Implication for the solver work: the operating point that matters is a path down to roughly 300 nonzeros per channel. On unit-100k the reliable channels' median nnz passes 300 at alpha index 23 of 50, and the CV-chosen indices have median 20.5 (min-CV) and 13.5 (1-SE). No channel selects an alpha index beyond 28 (unit-100k), 32 (raw) or 25 (unit-800k). The last ~18-25 alphas (median nnz 500-730 on unit-100k) are never chosen, but they are the most expensive part of the path. For Task CV, a solver (or the spec) could stop the fold paths once CV error has clearly risen, as torch_ws's `cv_stop` already does. I suggest the coordinator allow it explicitly. Accuracy beyond the loose tolerance does not change any of these numbers (celer, sklearn and torch_ws agree to 4 decimals). A structured penalty that selects whole feature maps (group Lasso over c, or the factorized spatial x feature readout in `CLAUDE.md`) is the natural next experiment for identifiability.
 
 ## Bugs found and fixed in my code
 
