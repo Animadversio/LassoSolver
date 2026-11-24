@@ -8,6 +8,9 @@ it defines the problem, the solver contract (`lassobench/api.py`), the metrics a
 - Y: noisy neuronal responses, n images x T channels (T = 64 to 384), n ~ 1e3 to 1e4.
 - X: DNN features in the **unit basis** (no PCA/SRP), p = 1e3 to 1e6+ features. p >> n.
 - Want weights sparse per unit, one independent Lasso per channel, each with its own alpha chosen by CV.
+- RidgeCV already gives the best R2 cheaply; Lasso is not expected to beat it. The goal is a sparse, stable
+  unit-basis readout (identifiability, fewer spurious features) at reasonable R2 and speed. Judge methods on the
+  R2-vs-sparsity frontier and support stability (spec section 9), on reliable channels, not on R2 alone.
 - Later direction (not now): factorized readout, spatially sparse x feature-wise dense.
 
 ## Where things go

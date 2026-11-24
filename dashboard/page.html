@@ -38,6 +38,12 @@
     <p class="ls-muted">Workload: an independent Lasso per recording channel (64 to 384 channels), each with its own penalty chosen by 5-fold cross-validation, on DNN unit features (thousands to millions of features, about a thousand images).</p>
   </div>
 
+  <section id="frontier">
+    <h2>Prediction against sparsity on unit-100k</h2>
+    <p class="ls-muted">Each point is one method's cross-validated fit on the layer4 unit basis (100,352 features, 64 channels, 20 reliable). Up and to the left is better: higher test R² on reliable channels with fewer nonzero weights per channel. Ridge uses every feature and is the R² reference.</p>
+    <div class="ls-chart dash-skeleton" id="frontier-chart" data-draw="frontier-chart" data-source="results"></div>
+  </section>
+
   <section id="time">
     <h2>Time for a full cross-validated fit, by solver</h2>
     <p class="ls-muted">Wall-clock seconds on a log scale, shorter is better. Runs are grouped by dataset tier and number of channels fitted, so bars in one group are comparable. Unit-basis tiers come first: they are the target; the PCA tiers are only a check against the old notebooks.</p>
@@ -137,6 +143,48 @@ dash.draw('time-chart', (el) => {
       }).on('pointerleave', () => tip.attr('hidden', ''));
       y += rowH;
     }
+  }
+});
+
+
+dash.draw('frontier-chart', (el) => {
+  const g = dash.data('results');
+  if (g.status === 'loading') return;
+  el.classList.remove('dash-skeleton');
+  el.replaceChildren();
+  if (g.status !== 'ok') { el.textContent = g.status === 'error' ? 'The results failed to load.' : '—'; return; }
+  const rows = g.data.filter((d) => d.tier === 'unit-100k' && d.test_r2_rel != null && d.nnz > 0);
+  if (!rows.length) { el.textContent = 'No unit-100k runs yet.'; return; }
+  const short = (s) => s.replace(/^torch_|^cpu_/, '');
+  const pts = d3.groups(rows, (d) => Math.round(Math.log10(d.nnz) * 12) + '|' + Math.round(d.test_r2_rel * 250)).map(([, rs]) => ({
+    nnz: d3.mean(rs, (d) => d.nnz), r2: d3.mean(rs, (d) => d.test_r2_rel), rs: rs.sort((a, b) => a.time_s - b.time_s),
+    names: [...new Set(rs.map((d) => short(d.solver)))], gpu: rs.every((d) => d.device === 'gpu')}));
+  const W = Math.max(280, el.clientWidth), H = 320, m = {l: 44, r: 16, t: 14, b: 38};
+  const x = d3.scaleLog().domain([d3.min(pts, (d) => d.nnz) / 2, d3.max(pts, (d) => d.nnz) * 2]).range([m.l, W - m.r]);
+  const y = d3.scaleLinear().domain([d3.min(pts, (d) => d.r2) - 0.01, d3.max(pts, (d) => d.r2) + 0.012]).range([H - m.b, m.t]);
+  const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H).attr('role', 'img')
+    .attr('aria-label', 'Scatter of test R squared on reliable channels against mean nonzero weights per channel, one point per method, on unit-100k');
+  const xt = x.ticks(5).filter((t) => Math.abs(Math.log10(t) % 1) < 1e-9), yt = y.ticks(5);
+  svg.append('g').selectAll('line').data(yt).join('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y).attr('y2', y).style('stroke', 'var(--cds-chart-grid)');
+  svg.append('g').selectAll('line').data(xt).join('line').attr('x1', x).attr('x2', x).attr('y1', m.t).attr('y2', H - m.b).style('stroke', 'var(--cds-chart-grid)');
+  svg.append('g').selectAll('text').data(yt).join('text').attr('class', 'ls-sub').attr('x', m.l - 6).attr('y', (t) => y(t) + 4).attr('text-anchor', 'end').text(d3.format('.2f'));
+  svg.append('g').selectAll('text').data(xt).join('text').attr('class', 'ls-sub').attr('x', x).attr('y', H - m.b + 16).attr('text-anchor', 'middle').text(d3.format(','));
+  svg.append('text').attr('class', 'ls-sub').attr('x', W - m.r).attr('y', H - 4).attr('text-anchor', 'end').text('Nonzero weights per channel (log scale)');
+  svg.append('text').attr('class', 'ls-sub').attr('x', 0).attr('y', 10).text('Test R², reliable channels');
+  const tip = d3.select(el).append('div').attr('class', 'ls-tip').attr('hidden', '');
+  for (const d of pts) {
+    const cx = x(d.nnz), cy = y(d.r2), right = cx < W * 0.62;
+    const gp = svg.append('g');
+    gp.append('circle').attr('cx', cx).attr('cy', cy).attr('r', 6).style('fill', d.gpu ? GPU : CPU).style('stroke', 'var(--color-bg)').style('stroke-width', 2);
+    gp.append('text').attr('x', cx + (right ? 10 : -10)).attr('y', cy + 4).attr('text-anchor', right ? 'start' : 'end').text(d.names.join(' / '));
+    gp.append('circle').attr('cx', cx).attr('cy', cy).attr('r', 16).style('fill', 'transparent');
+    gp.on('pointermove', () => {
+      tip.attr('hidden', null).html('');
+      tip.append('b').text(d3.format('.3f')(d.r2) + ' R² · ' + d3.format(',.0f')(d.nnz) + ' nonzeros');
+      for (const r of d.rs) tip.append('span').text(short(r.solver) + ' · ' + r.hardware + ' · ' + fmtTime(r.time_s));
+      const tw = tip.node().offsetWidth;
+      tip.style('left', Math.max(0, Math.min(cx + 12, W - tw)) + 'px').style('top', (cy + 14) + 'px');
+    }).on('pointerleave', () => tip.attr('hidden', ''));
   }
 });
 

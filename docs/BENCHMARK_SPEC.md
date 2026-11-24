@@ -98,3 +98,25 @@ dict the harness discovers (`SOLVERS = {"name": Class}` at module level). Helper
 - `pca1k` / `pca1k-raw` are a correctness and regression check against the old notebooks only. Do not spend
   tuning effort on small-p performance, and do not headline PCA numbers.
 - Headline statistical metric stays test R2 over reliable channels (section 7).
+
+## 9. What Lasso is for here (user direction, 2026-11-23) and round-2 metrics
+
+RidgeCV is fast and predicts well (unit-100k: reliable-channel test R2 0.347-0.352 in 3 s). Lasso is **not** expected
+to beat it on R2. The point of Lasso is a **sparse readout in the unit basis**: better identifiability of which
+units drive a channel, and fewer spuriously correlated features. So the target is: reasonable R2 (close to Ridge),
+reasonable speed, and as sparse and as stable a support as possible. R2 alone does not decide.
+
+Round-2 metrics, in addition to time and reliable-channel R2:
+- **R2-vs-sparsity frontier.** For every method, mean reliable-channel test R2 as a function of nonzeros per
+  channel, read at fixed budgets k = 10, 30, 100, 300, 1000 (interpolating along the path; dense methods are
+  truncated to top-k |w| and refit only if they say so). Ridge's R2 is the reference line. A method is better if
+  its frontier is higher at the same k.
+- **Support stability (identifiability proxy).** Jaccard overlap of the selected support (a) across the 5 CV
+  folds at the selected alpha, and (b) across two fits on disjoint halves of the trials / images. Report per
+  reliable channel, mean and median. Also the fraction of selected units that are among the top-|corr| units,
+  as a check on spurious picks.
+- **Selection rules.** Report both min-CV-error alpha and the one-standard-error rule (sparsest alpha within
+  1 SE of the minimum), since the latter is the natural operating point for this goal.
+- **Sparse-then-refit.** For any sparse support, also report R2 after an unpenalized or ridge refit restricted
+  to that support (relaxed Lasso): it shows how much of the Lasso-vs-Ridge R2 gap is shrinkage bias rather than
+  lost features.
