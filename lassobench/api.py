@@ -9,12 +9,19 @@ Y is (n, T) float32, column-centered. No intercept is fitted. p >> n is the regi
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
-STORE = "/n/holylabs/LABS/kempner_alvarez_lab/Lab/binxuwang/Projects/LassoSolver"
+# Storage root for big files (data tiers, caches, raw results). Override with LASSOBENCH_STORE to run from
+# another account: point it at a directory you can write to. Tiers are read from `DATA_ROOT`, which defaults to
+# STORE/data and can be pointed at the lab's read-only copy with LASSOBENCH_DATA, e.g.
+#   export LASSOBENCH_DATA=/n/holylabs/LABS/kempner_alvarez_lab/Lab/shared/LassoSolver/data
+#   export LASSOBENCH_STORE=/path/you/own/LassoSolver
+STORE = os.environ.get("LASSOBENCH_STORE", "/n/holylabs/LABS/kempner_alvarez_lab/Lab/binxuwang/Projects/LassoSolver")
+DATA_ROOT = os.environ.get("LASSOBENCH_DATA", os.path.join(STORE, "data"))
 
 
 @dataclass
