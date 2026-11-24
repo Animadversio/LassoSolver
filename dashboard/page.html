@@ -51,6 +51,17 @@
     <div class="ls-chart dash-skeleton" id="matched-chart" data-draw="matched-chart" data-source="frontier"></div>
   </section>
 
+  <section id="stability">
+    <h2>How stable is the set of selected units?</h2>
+    <p class="ls-muted">Overlap (Jaccard, 0 to 1) between the units a channel's Lasso selects on different subsets of the 822 training images, mean over the 20 reliable channels. Folds are the five cross-validation fits, which share 80% of their images; halves are two fits on disjoint halves. Feature maps counts a unit by its channel of the DNN layer, ignoring spatial position. Units per channel is on the reliable channels.</p>
+    <div class="ls-scroll">
+      <table id="stability-table" data-source="stability" data-row-key="id">
+        <thead><tr><th data-field="tier">Tier</th><th data-field="rule">Model</th><th class="ls-num" data-field="r2">Test R², reliable</th><th class="ls-num" data-field="nnz">Units per channel</th><th class="ls-num" data-field="j_folds_units">Overlap across folds, units</th><th class="ls-num" data-field="j_halves_units">Overlap across halves, units</th><th class="ls-num" data-field="j_folds_maps">Across folds, feature maps</th><th class="ls-num" data-field="j_halves_maps">Across halves, feature maps</th></tr></thead>
+        <tbody data-draw="stability-body"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section id="time">
     <h2>Time for a full cross-validated fit, by solver</h2>
     <p class="ls-muted">Wall-clock seconds on a log scale, shorter is better. Runs are grouped by dataset tier and number of channels fitted, so bars in one group are comparable. Unit-basis tiers come first: they are the target; the PCA tiers are only a check against the old notebooks.</p>
@@ -262,6 +273,19 @@ dash.draw('ideas-body', (tb) => {
     const pill = document.createElement('span'); pill.className = 'ls-pill'; pill.dataset.s = d.status; pill.textContent = d.status;
     tr.insertCell().append(pill);
     cell(tr, d.owner); cell(tr, d.detail, 'ls-note'); cell(tr, d.verdict, 'ls-wide');
+  }
+});
+
+
+dash.draw('stability-body', (tb) => {
+  const g = dash.data('stability');
+  tb.replaceChildren();
+  if (g.status === 'loading') return;
+  if (g.status !== 'ok') { failRow(tb, 8, g.status === 'error' ? 'The stability table failed to load.' : '—'); return; }
+  for (const d of g.data) {
+    const tr = tb.insertRow(); tr.dataset.key = encodeURIComponent(d.id);
+    cell(tr, d.tier); cell(tr, d.rule);
+    for (const k of ['r2', 'nnz', 'j_folds_units', 'j_halves_units', 'j_folds_maps', 'j_halves_maps']) cell(tr, d[k], 'ls-num');
   }
 });
 

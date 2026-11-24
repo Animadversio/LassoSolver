@@ -1,0 +1,7 @@
+id	tier	rule	r2	nnz	j_folds_units	j_halves_units	j_folds_maps	j_halves_maps
+s0	unit-100k (layer4)	Lasso, min CV error	0.326	252	0.15	0.007	0.24	0.07
+s1	unit-100k (layer4)	Lasso, 1-SE rule	0.294	82	0.21	0.015	0.31	0.07
+s2	unit-100k-raw (layer4, unscaled)	Lasso, min CV error	0.316	206	0.19	0.015	0.32	0.13
+s3	unit-100k-raw (layer4, unscaled)	Lasso, 1-SE rule	0.274	67	0.26	0.022	0.37	0.12
+s4	unit-800k (layer1)	Lasso, min CV error	0.033	176	0.09	0.001	0.43	0.34
+s5	unit-800k (layer1)	Lasso, 1-SE rule	-0.068	17	0.12	0.001	0.24	0.12
