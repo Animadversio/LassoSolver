@@ -1,6 +1,6 @@
 """Dataset tiers for the Lasso benchmark (owned by bench-harness).
 
-Every tier lives in `STORE/data/<tier>/` as float32 `X_train.npy, Y_train.npy, X_test.npy, Y_test.npy`
+Every tier lives in `DATA_ROOT/<tier>/` (default STORE/data, env LASSOBENCH_DATA) as float32 `X_train.npy, Y_train.npy, X_test.npy, Y_test.npy`
 plus `meta.json`. X is z-scored with training-row statistics (constant columns dropped), Y is centered
 and z-scored with training-row statistics. Load with `load_tier(name)`, which memory-maps the arrays.
 
@@ -16,9 +16,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from lassobench.api import STORE, make_synthetic
+from lassobench.api import DATA_ROOT, make_synthetic  # DATA_ROOT may be a read-only shared copy
 
-DATA_ROOT = os.path.join(STORE, "data")
+# Builders (build_tier, save_tier, scripts/build_*.py) write into DATA_ROOT; readers only read from it.
 
 # Raw sources (read-only)
 VVS = "/n/holylfs06/LABS/kempner_fellow_binxuwang/Users/binxuwang/Projects/VVS_Accentuation"

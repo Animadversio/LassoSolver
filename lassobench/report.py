@@ -1,6 +1,7 @@
 """Regenerate tables/leaderboard.md and figures/time_vs_subopt_<tier>.png from tables/results.jsonl.
 
-  python -m lassobench.report            (owned by bench-harness)
+  python -m lassobench.report [results.jsonl ...] [--out tables/leaderboard.md] [--figdir figures]
+  (default input: LASSOBENCH_RESULTS or tables/results.jsonl; several files are concatenated)   (owned by bench-harness)
 
 Task P: one row per (solver, hardware, tol) run, plus per (solver, hardware) the time-to-loose / time-to-tight
 (fastest run whose max relative duality gap meets 1e-4 / 1e-6). Because the harness gap uses the simple
@@ -165,7 +166,7 @@ def analysis_section(t, an):
     return o
 
 
-def build(rows=None):
+def build(rows=None, out_path=None, figdir=None):
     rows = [remap_tier(r) for r in (rows if rows is not None else read_results()) if keep(r) and not superseded(r)]
     files = _solver_files()
     for r in rows:
@@ -247,14 +248,15 @@ def build(rows=None):
             if rest:
                 out += ["<details><summary>Unranked CV rows (uncommitted solver code, other tol, errors)</summary>", ""] + hdr + \
                        [line("-", r) for r in sorted(rest, key=lambda r: (r["solver"], hw_label(r)))] + ["", "</details>", ""]
-    os.makedirs(os.path.dirname(LB), exist_ok=True)
-    with open(LB, "w") as fh:
+    os.makedirs(os.path.dirname(os.path.abspath(out_path or LB)), exist_ok=True)
+    lb = out_path or LB
+    with open(lb, "w") as fh:
         fh.write("\n".join(out) + "\n")
-    figs = [plot_tier(t, by_tier[t]) for t in tiers]
-    return LB, [p for p in figs if p]
+    figs = [plot_tier(t, by_tier[t], figdir) for t in tiers]
+    return lb, [p for p in figs if p]
 
 
-def plot_tier(tier, rs):
+def plot_tier(tier, rs, figdir=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -298,15 +300,23 @@ def plot_tier(tier, rs):
     fig.suptitle(f"{tier}: time vs accuracy, Task P (n={shp['n_train']}, p={shp['p']}, T={shp['T']})", fontsize=11)
     nrow = (len(groups) + 3) // 4
     fig.tight_layout(rect=(0, 0.06 * nrow + 0.02, 1, 0.95))
-    os.makedirs(FIG, exist_ok=True)
-    path = os.path.join(FIG, f"time_vs_subopt_{tier}.png")
+    figdir = figdir or FIG
+    os.makedirs(figdir, exist_ok=True)
+    path = os.path.join(figdir, f"time_vs_subopt_{tier}.png")
     fig.savefig(path, dpi=130)
     plt.close(fig)
     return path
 
 
 if __name__ == "__main__":
-    lb, figs = build()
+    import argparse
+    ap = argparse.ArgumentParser(description="Regenerate the leaderboard and figures from one or more result files")
+    ap.add_argument("files", nargs="*", help=f"result .jsonl files (default {RESULTS})")
+    ap.add_argument("--out", default=None, help=f"leaderboard path (default {LB})")
+    ap.add_argument("--figdir", default=None, help=f"figure directory (default {FIG})")
+    a = ap.parse_args()
+    rows = [r for fpath in (a.files or [RESULTS]) for r in read_results(fpath)]
+    lb, figs = build(rows, a.out, a.figdir)
     print(lb)
     for p in figs:
         print(p)

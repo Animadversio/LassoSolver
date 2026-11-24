@@ -32,8 +32,10 @@ from lassobench import api, evaluate as ev
 from lassobench.data import Tier, load_tier
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RESULTS = os.path.join(REPO, "tables", "results.jsonl")
-RAW_DIR = os.path.join(api.STORE, "results", "raw")
+# Result log: one JSON row per run. Set LASSOBENCH_RESULTS to write your own file (avoids merge conflicts in the
+# shared tables/results.jsonl); `python -m lassobench.report <files...>` can combine several.
+RESULTS = os.environ.get("LASSOBENCH_RESULTS", os.path.join(REPO, "tables", "results.jsonl"))
+RAW_DIR = os.path.join(api.STORE, "results", "raw")   # always under the writable STORE, never DATA_ROOT
 N_FOLDS, FOLD_SEED = 5, 0
 N_ALPHAS, ALPHA_EPS = 50, 1e-2
 

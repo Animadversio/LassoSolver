@@ -177,10 +177,18 @@ def save_reference(tier_name, coefs, alphas, q, info):
         json.dump(info, f, indent=1, default=str)
 
 
+def ref_search_dirs(tier_name):
+    """Where cached references are read from: STORE/cache/ref (writable, where build_reference saves), then
+    a shared read-only copy next to DATA_ROOT (DATA_ROOT/../cache/ref), e.g. the lab's shared LassoSolver copy."""
+    import os
+    from lassobench.api import DATA_ROOT
+    return [ref_dir(tier_name), os.path.join(os.path.dirname(os.path.abspath(DATA_ROOT)), "cache", "ref", tier_name)]
+
+
 def load_reference(tier_name, with_coefs=True):
     import json, os
-    d = ref_dir(tier_name)
-    if not os.path.exists(os.path.join(d, "ref.npz")):
+    d = next((d for d in ref_search_dirs(tier_name) if os.path.exists(os.path.join(d, "ref.npz"))), None)
+    if d is None:
         return None
     z = np.load(os.path.join(d, "ref.npz"))
     ref = {k: z[k] for k in z.files}
