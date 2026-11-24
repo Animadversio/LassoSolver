@@ -145,6 +145,13 @@ def extract_rows(W: torch.Tensor, rows: torch.Tensor):
     Returns list of (feature_idx int32, values float32), one per requested row."""
     if rows.numel() == 0:
         return []
+    p = W.shape[1]
+    step = max(1, int((2**31 - 1) // max(1, p)) // 2)   # torch.nonzero is limited to INT_MAX elements
+    if rows.numel() > step:
+        out = []
+        for i in range(0, rows.numel(), step):
+            out += extract_rows(W, rows[i:i + step])
+        return out
     sub = W.index_select(0, rows)                     # (k, p)
     nz = sub.nonzero()                                # row-major: sorted by column then feature
     vals = sub[nz[:, 0], nz[:, 1]].float().cpu().numpy()
