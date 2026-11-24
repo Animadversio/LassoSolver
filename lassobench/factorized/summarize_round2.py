@@ -32,12 +32,15 @@ SPLIT_MODELS = [  # (name, label, how to get the (n_te, T) prediction from a spl
     ("factgd_r1_ens5", "factgd r1 5-member ens.", lambda z: z["r1_mem_pred"].mean(0)),
     ("factgd_r2_single", "factgd r2 single (100% refit)", lambda z: z["r2_single_pred"]),
     ("factgd_r2_ens5", "factgd r2 5-member ens.", lambda z: z["r2_mem_pred"].mean(0)),
+    ("nuclear_single", "nuclear-norm single (100% refit)", None),
+    ("nuclear_ens5", "nuclear-norm 5-member ens.", None),
 ]
 MEMBER_MODELS = [  # single 80% members, mean over members of the per-member R2
     ("ridge_member80", "Ridge one 80% fit", "ridgebag_mem_pred"),
     ("lasso_member80", "Lasso one 80% member", "lassomem_pred"),
     ("factgd_r1_member80", "factgd r1 one 80% member", "r1_mem_pred"),
     ("factgd_r2_member80", "factgd r2 one 80% member", "r2_mem_pred"),
+    ("nuclear_member80", "nuclear-norm one 80% member", None),
 ]
 
 
@@ -128,9 +131,18 @@ def split_tables(od, tier):
         rel = z["reliable"]
         Yte = z["Yte"]
         for name, _, f in SPLIT_MODELS:
-            per.setdefault(name, []).append(r2(Yte, f(z))[rel])
+            if f is not None:
+                per.setdefault(name, []).append(r2(Yte, f(z))[rel])
         for name, _, key in MEMBER_MODELS:
-            per.setdefault(name, []).append(np.mean([r2(Yte, p)[rel] for p in z[key]], 0))
+            if key is not None:
+                per.setdefault(name, []).append(np.mean([r2(Yte, p)[rel] for p in z[key]], 0))
+        nf = os.path.join(od, f"nuclear_split{k}.npz")
+        if os.path.exists(nf):
+            zn = np.load(nf)
+            per.setdefault("nuclear_single", []).append(r2(Yte, zn["nuclear_single_pred"])[rel])
+            per.setdefault("nuclear_ens5", []).append(r2(Yte, zn["nuclear_mem_pred"].mean(0))[rel])
+            per.setdefault("nuclear_member80", []).append(np.mean([r2(Yte, p)[rel] for p in zn["nuclear_mem_pred"]], 0))
+            nnz.setdefault("nuclear_rank", []).append(zn["nuclear_single_rank"][rel].mean())
         nnz.setdefault("lasso_cv", []).append(z["lassocv_nnz"][rel].mean())
         nnz.setdefault("lasso_mem5", []).append(z["lassomem_nnz"][:, rel].mean())
         nnz.setdefault("lasso_member80", []).append(z["lassomem_nnz"][:, rel].mean())
@@ -141,6 +153,8 @@ def split_tables(od, tier):
     ref = per["ridgecv"]
     rows = {}
     for name in [m[0] for m in SPLIT_MODELS] + [m[0] for m in MEMBER_MODELS]:
+        if name not in per or len(per[name]) != len(ks):
+            continue
         v = per[name]
         means = np.array([x.mean() for x in v])
         dif = [x - y for x, y in zip(v, ref)]
@@ -154,6 +168,8 @@ def split_tables(od, tier):
                           se_splits=float(dm.std(ddof=1) / np.sqrt(len(dm))) if len(dm) > 1 else None,
                           se_ch_mean=float(se_ch.mean()), n_splits=len(ks), n_better_splits=int((dm > 0).sum()),
                           nnz_mean=float(np.mean(nnz[name])) if name in nnz else None)
+        if name.startswith("nuclear") and "nuclear_rank" in nnz:
+            rows[name]["rank_single_mean"] = float(np.mean(nnz["nuclear_rank"]))
     # ensemble vs ensemble: factgd ens5 - ridge bag5
     for r in (1, 2):
         dif = [x - y for x, y in zip(per[f"factgd_r{r}_ens5"], per["ridge_bag5"])]
@@ -197,6 +213,15 @@ def stability_tables(od, shape):
             for rr in (1, 2):
                 runs = [dict(W=W[i], pred=P[i], r=rr) for i in ii]
                 summarize(runs, "lin", f"{meth}(svd r{rr})|{lab}")
+    nf = os.path.join(od, "nuclear_split0.npz")
+    if os.path.exists(nf):
+        zn = np.load(nf)
+        nn = [str(x) for x in zn["subset_names"]]
+        for lab, ii in (("data80", [i for i, x in enumerate(nn) if x.startswith("sub")]),
+                        ("half", [i for i, x in enumerate(nn) if x.startswith("half")])):
+            for rr in (1, 2):
+                runs = [dict(W=zn["nuclear_data_W"][i], pred=zn["nuclear_data_pred"][i], r=rr) for i in ii]
+                summarize(runs, "lin", f"nuclear(svd r{rr})|{lab}")
     # cross-method: factgd r1 (data runs, sub0) factors vs Ridge(full) rank-1 SVD factors
     cross = {"mask": [], "feature": []}
     Wr = z["ridge_full_W"]
@@ -255,6 +280,8 @@ def main(argv=None):
           "diff vs RidgeCV, mean over splits (SE splits) | splits better | nonzero units |")
     print("|---|---|---|---|---|---|---|")
     for name, lab, *_ in SPLIT_MODELS + MEMBER_MODELS:
+        if name not in rows:
+            continue
         r = rows[name]
         nz = ("dense" if name.startswith("ridge") else "n/a") if r["nnz_mean"] is None else f"{r['nnz_mean']:.0f}"
         print(f"| {lab} | {r['split_means'][0]:.3f} | {r['mean']:.3f} ± {fmt(r['sd'])} | "
@@ -307,7 +334,7 @@ def figures(tier, ks, per, summ):
     import matplotlib.pyplot as plt
     os.makedirs(FIG, exist_ok=True)
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    names = [m[0] for m in SPLIT_MODELS]
+    names = [m[0] for m in SPLIT_MODELS if m[0] in per and len(per[m[0]]) == len(ks)]
     for i, n in enumerate(names):
         y = [v.mean() for v in per[n]]
         ax.plot(np.full(len(y), i) + np.linspace(-0.2, 0.2, len(y)), y, "o", ms=5, label=None)
@@ -315,7 +342,7 @@ def figures(tier, ks, per, summ):
     for k in range(len(ks)):
         ax.plot(range(len(names)), [per[n][k].mean() for n in names], "-", color="gray", lw=0.5, alpha=0.6)
     ax.set_xticks(range(len(names)))
-    ax.set_xticklabels([m[1] for m in SPLIT_MODELS], rotation=30, ha="right", fontsize=8)
+    ax.set_xticklabels([m[1] for m in SPLIT_MODELS if m[0] in names], rotation=30, ha="right", fontsize=8)
     ax.set_ylabel("test R2, mean over reliable channels")
     ax.set_title(f"{tier}: {len(ks)} train/test splits (grey lines join the same split)", fontsize=10)
     ax.grid(alpha=0.3)
@@ -345,6 +372,8 @@ def write_rows(tier, rows, summ, meta0):
     from lassobench import runner
     hw = (meta0 or {}).get("hardware")
     for name, lab, *_ in SPLIT_MODELS + MEMBER_MODELS:
+        if name not in rows:
+            continue
         r = rows[name]
         m = dict(r2_test_mean_reliable=r["split_means"][0], r2_splits_mean_reliable=r["mean"],
                  r2_splits_sd_reliable=r["sd"], diff_vs_ridgecv_split0=r["diff_vs_ridge_split0"],
@@ -368,7 +397,7 @@ def write_rows(tier, rows, summ, meta0):
                    hardware=hw, git_hash=(meta0 or {}).get("git_hash"), git_dirty=(meta0 or {}).get("git_dirty"),
                    status="ok", metrics=m, raw=os.path.join(OUT_DIR, tier, "round2"))
         runner.append_row(row)
-    print(f"wrote {len(SPLIT_MODELS) + len(MEMBER_MODELS)} rows")
+    print(f"wrote {sum(n in rows for n, *_ in SPLIT_MODELS + MEMBER_MODELS)} rows")
 
 
 if __name__ == "__main__":

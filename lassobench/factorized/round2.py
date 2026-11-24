@@ -343,7 +343,7 @@ def _svt(V, thr):
     return V @ (Qf * f[:, None, :]) @ Qf.transpose(1, 2), (s > thr.double()[:, None]).sum(1)
 
 
-def nuclear_path(X, Y, shape, lam_rel=None, iters=None):
+def nuclear_path(X, Y, shape, lam_rel=None, iters=None, lam_max=None):
     """min_W 1/(2n)|Yc - Xc W|^2 + lam_t |W_t|_* per channel, W_t = C x HW; FISTA with restart, warm start
     down the grid lam_t = lam_rel * lam_max_t. X (n, p), Y (n, T) torch. Yields (k, W (p, T), b (T,), rank)."""
     C, H, Wd = shape
@@ -353,8 +353,10 @@ def nuclear_path(X, Y, shape, lam_rel=None, iters=None):
     T = Y.shape[1]
     mx, my = X.mean(0), Y.mean(0)
     Xc, Yc = X - mx, Y - my
-    G0 = (Xc.T @ Yc / n).T.reshape(T, C, H * Wd)
-    lam_max = torch.linalg.matrix_norm(G0, ord=2)                     # (T,)
+    if lam_max is None:                                               # smallest lam with W = 0, per channel
+        G0 = (Xc.T @ Yc / n).T.reshape(T, C, H * Wd)
+        lam_max = torch.linalg.matrix_norm(G0, ord=2)                 # (T,)
+    lam_max = torch.as_tensor(lam_max, device=X.device, dtype=torch.float32)
     v = torch.randn(p, device=X.device)
     for _ in range(30):
         v = Xc.T @ (Xc @ v)
@@ -396,20 +398,60 @@ def nuclear_pipeline(sp_, name="nuclear"):
     tt = np.arange(T)
     P_mem = preds[gsel, :, :, tt].transpose(1, 2, 0)                  # (M, n_te, T)
     # refit on 100%: run the path and take each channel's selected point
-    Wsel = torch.zeros(X.shape[1], T, device=DEV)
-    bsel = torch.zeros(T, device=DEV)
-    rsel = np.zeros(T)
-    for k, W, b, rk in nuclear_path(X, Y, sp_.shape, lam_rel=NUC_GRID[: int(gsel.max()) + 1]):
-        cols = np.flatnonzero(gsel == k)
-        Wsel[:, cols], bsel[cols] = W[:, cols], b[cols]
-        rsel[cols] = rk.cpu().numpy()[cols]
+    Wsel, bsel, rsel = nuclear_at(X, Y, sp_.shape, gsel)
+    Xc, Yc = X - X.mean(0), Y - Y.mean(0)
+    lam_max = torch.linalg.matrix_norm((Xc.T @ Yc / sp_.n).T.reshape(T, sp_.shape[0], -1), ord=2)
+    del Xc, Yc
     P_single = (Xte @ Wsel + bsel).cpu().numpy()
     rel = sp_.rel
     _log(f"  {name} split{sp_.k}: single R2 rel={r2(sp_.Yte, P_single)[rel].mean():.3f} "
          f"ens={r2(sp_.Yte, P_mem.mean(0))[rel].mean():.3f} rank rel={rsel[rel].mean():.2f} "
          f"({time.perf_counter() - t0:.0f}s)")
     return dict(val_grid=val, gsel=gsel, single_pred=P_single, mem_pred=P_mem, single_rank=rsel,
-                mem_rank=ranks[gsel, :, tt].T, single_W=Wsel.cpu().numpy(), time_s=time.perf_counter() - t0)
+                mem_rank=ranks[gsel, :, tt].T, single_W=Wsel.cpu().numpy(), lam_max=lam_max.cpu().numpy(),
+                time_s=time.perf_counter() - t0)
+
+
+def nuclear_at(X, Y, shape, gsel, lam_max=None):
+    """Nuclear-norm fit stopping each channel at grid point gsel[t] (lam = NUC_GRID[gsel] * lam_max)."""
+    T = Y.shape[1]
+    Wsel = torch.zeros(X.shape[1], T, device=X.device)
+    bsel = torch.zeros(T, device=X.device)
+    rsel = np.zeros(T)
+    for k, W, b, rk in nuclear_path(X, Y, shape, lam_rel=NUC_GRID[: int(gsel.max()) + 1], lam_max=lam_max):
+        cols = np.flatnonzero(gsel == k)
+        Wsel[:, cols], bsel[cols] = W[:, cols], b[cols]
+        rsel[cols] = rk.cpu().numpy()[cols]
+    return Wsel, bsel, rsel
+
+
+def part_nuclear(tier, splits):
+    """Nuclear-norm stand-in on every split (as `splits`) and, on split 0, its seed-free data stability:
+    fixed per-channel lambda (absolute, from the all-rows fit) on the five 80% subsets and the two halves."""
+    from lassobench.runner import half_split
+    for k, sp_ in splits.items():
+        t0 = time.perf_counter()
+        nuc = nuclear_pipeline(sp_)
+        res = {f"nuclear_{k_}": v for k_, v in nuc.items() if k_ != "single_W"}
+        if k == 0:
+            res["nuclear_single_W"] = nuc["single_W"]
+            n = sp_.n
+            subsets = [("sub%d" % m, member_split(n, m)[0]) for m in MEMBERS]
+            subsets += [("half%d" % i, h) for i, h in enumerate(half_split(n, seed=1))]
+            X = torch.as_tensor(sp_.flat(sp_.Xtr), device=DEV)
+            Y = torch.as_tensor(sp_.Ytr, device=DEV)
+            Xte = torch.as_tensor(sp_.flat(sp_.Xte), device=DEV)
+            Ws, Ps, Rk = [], [], []
+            for nm, rows in subsets:
+                ri = torch.as_tensor(rows, device=DEV)
+                W, b, rk = nuclear_at(X[ri], Y[ri], sp_.shape, nuc["gsel"], lam_max=nuc["lam_max"])
+                Ws.append(W.cpu().numpy()), Ps.append((Xte @ W + b).cpu().numpy()), Rk.append(rk)
+                _log(f"  nuclear stab {nm}: R2 rel={r2(sp_.Yte, Ps[-1])[sp_.rel].mean():.3f} "
+                     f"rank={rk[sp_.rel].mean():.2f}")
+            res.update(nuclear_data_W=np.stack(Ws), nuclear_data_pred=np.stack(Ps), nuclear_data_rank=np.stack(Rk),
+                       subset_names=np.array([s for s, _ in subsets]))
+        _save(tier, f"nuclear_split{k}", meta=_meta(tier, f"nuclear_split{k}", dict(time_s=time.perf_counter() - t0)),
+              Yte=sp_.Yte, reliable=sp_.rel, **res)
 
 
 # ----------------------------------------------------------------------------------------------- parts
@@ -593,8 +635,8 @@ def main(argv=None):
         QUICK[0] = True
         _log("QUICK MODE")
     parts = a.parts.split(",")
-    ks = [int(k) for k in a.splits.split(",")] if "splits" in parts else []
-    if any(p in parts for p in ("stab", "ablate", "timing")):
+    ks = [int(k) for k in a.splits.split(",")] if ("splits" in parts or "nuclear" in parts) else []
+    if any(p in parts for p in ("stab", "ablate", "timing")) or "nuclear" in parts:
         ks = sorted(set(ks) | {0})
     t0 = time.perf_counter()
     d, S = load_splits(a.tier, ks)
@@ -606,6 +648,8 @@ def main(argv=None):
         for k in ks:
             if str(k) in a.splits.split(","):
                 part_split(a.tier, S[k])
+    if "nuclear" in parts:
+        part_nuclear(a.tier, {k: S[k] for k in ks})
     if "stab" in parts:
         part_stab(a.tier, S[0])
     if "ablate" in parts:
