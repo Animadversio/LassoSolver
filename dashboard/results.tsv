@@ -35,3 +35,8 @@ unit-100k	cpu_celer	32 CPU threads	cpu	64	403	0.157	0.326	129	harness 2026-11-23
 unit-100k	torch_prox_adam	H200	gpu	64	191	0.16	0.33	447	harness 2026-11-23	epochs=1000, lr=0.01; 50 alphas x 5 folds, p=100352
 unit-800k-raw	cpu_ridgecv	32 CPU threads	cpu	64	8.81	0.0328	0.0757	7.8e+05	harness 2026-11-23	50 alphas x 5 folds, p=779947
 unit-800k	cpu_ridgecv	32 CPU threads	cpu	64	10.3	0.0572	0.125	7.8e+05	harness 2026-11-23	50 alphas x 5 folds, p=779947
+pca1k-raw	cpu_sklearn_lassocv_legacy	32 CPU threads	cpu	64	580	0.147	0.306	51.6	harness 2026-11-23	max_iter=1000, n_jobs=16; 50 alphas x 5 folds, p=1000
+unit-100k	cpu_ridgecv	32 CPU threads	cpu	64	2.78	0.164	0.347	1e+05	harness 2026-11-23	50 alphas x 5 folds, p=100352
+unit-100k	torch_prox_sgd	H200	gpu	64	155	0.176	0.367	2.14e+03	harness 2026-11-23	epochs=1000, lr_schedule=const; 50 alphas x 5 folds, p=100352
+unit-100k-raw	cpu_ridgecv	32 CPU threads	cpu	64	3.68	0.167	0.352	1e+05	harness 2026-11-23	50 alphas x 5 folds, p=100352
+unit-100k	torch_prox_adam_mb	H200	gpu	64	99.1	0.164	0.338	268	harness 2026-11-23	batch_size=128, epochs=100, lr=0.01; 50 alphas x 5 folds, p=100352
