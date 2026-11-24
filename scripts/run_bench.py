@@ -38,6 +38,7 @@ def main():
     ap.add_argument("--eval-alpha-stride", type=int, default=1, help="evaluate gap on every k-th alpha (huge tiers)")
     ap.add_argument("--out", default=None, help="results file (default tables/results.jsonl)")
     ap.add_argument("--tag", default=None)
+    ap.add_argument("--analysis", action="store_true", help="Task CV: round-2 frontier/stability/1-SE/relaxed refit (untimed)")
     ap.add_argument("--list", action="store_true", help="list solvers and tiers")
     a = ap.parse_args()
 
@@ -59,7 +60,8 @@ def main():
             kw["tol"] = tol
         row, _ = runner.run(a.solver, a.tier, a.task, kw, timeout=a.timeout, warmup_mode=a.warmup,
                             max_targets=a.max_targets, evaluate=not a.no_eval,
-                            eval_alpha_stride=a.eval_alpha_stride, out=a.out or runner.RESULTS, tag=a.tag)
+                            eval_alpha_stride=a.eval_alpha_stride, out=a.out or runner.RESULTS, tag=a.tag,
+                            analysis=a.analysis)
         if row["status"] == "error":
             print(row.get("traceback", ""), file=sys.stderr)
 

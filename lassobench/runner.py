@@ -220,10 +220,11 @@ def _timed_fit_path(solver, X, Y, alphas):
     return res, time.perf_counter() - t0
 
 
-def default_fit_cv(solver, X, Y, alphas, folds):
+def default_fit_cv(solver, X, Y, alphas, folds, keep_paths=False):
     A, T = alphas.shape
     mse = np.zeros((len(folds), A, T))
     info = dict(fold_times_s=[], fold_infos=[])
+    fold_paths = []
     for k, (tr, va) in enumerate(folds):
         Xtr, Ytr = np.ascontiguousarray(X[tr]), np.ascontiguousarray(Y[tr])
         res, dt = _timed_fit_path(solver, Xtr, Ytr, alphas)
@@ -233,15 +234,58 @@ def default_fit_cv(solver, X, Y, alphas, folds):
             mse[k, a] = ((Yva - ev.predict(Xva, res.coefs[a])) ** 2).mean(0)
         info["fold_times_s"].append(dt)
         info["fold_infos"].append(_small(res.info))
+        if keep_paths:
+            fold_paths.append([sp.csc_matrix(c) for c in res.coefs])
         del Xtr, Ytr, res
     cv_mse = mse.mean(0)
     best = np.argmin(cv_mse, axis=0)                  # first minimum = largest alpha among ties
-    amax = int(best.max())
+    amax = A - 1 if keep_paths else int(best.max())   # analysis needs the full refit path
     res, dt = _timed_fit_path(solver, np.asarray(X), np.asarray(Y), np.ascontiguousarray(alphas[: amax + 1]))
     check_path_result(res, X.shape[1], T, amax + 1)
     cols = [sp.csc_matrix(res.coefs[best[t]])[:, t] for t in range(T)]
-    info.update(refit_time_s=dt, refit_info=_small(res.info))
-    return dict(coef=sp.hstack(cols).tocsc(), best_idx=best, cv_mse=cv_mse, info=info)
+    info.update(refit_time_s=dt, refit_info=_small(res.info), refit_full_path=bool(keep_paths))
+    out = dict(coef=sp.hstack(cols).tocsc(), best_idx=best, cv_mse=cv_mse, info=info)
+    if keep_paths:
+        out.update(fold_paths=fold_paths, path_coefs=[sp.csc_matrix(c) for c in res.coefs])
+    return out
+
+
+def half_split(n, seed=1):
+    perm = np.random.default_rng(seed).permutation(n)
+    return [np.sort(perm[: n // 2]), np.sort(perm[n // 2:])]
+
+
+def run_analysis(solver, tier, X, Y, alphas, folds, result):
+    """Untimed round-2 analysis (spec section 9). Returns (summary, per-channel arrays, seconds)."""
+    from lassobench.solvers.cpu_ridgecv import RidgeCVBaseline
+    t0 = time.perf_counter()
+    rel = tier.reliable_mask()
+    rr = RidgeCVBaseline().fit_cv(X, Y, None, None)
+    ridge = dict(coef=rr["coef"], r2=ev.r2_per_channel(tier.Y_test, ev.predict(tier.X_test, rr["coef"])),
+                 fold_coefs=[RidgeCVBaseline().fit_cv(np.asarray(X[tr]), np.asarray(Y[tr]), None, None)["coef"]
+                             for tr, va in folds])
+    halves = half_split(X.shape[0])
+    has_path = type(solver).fit_path is not api.Solver.fit_path
+    if not has_path:  # dense / own-grid methods: top-k frontier of their own coefficients + ridge reference
+        r2 = ev.r2_per_channel(tier.Y_test, ev.predict(tier.X_test, result["coef"]))
+        S = dict(ridge_r2_reliable=ev._rel_stats(ridge["r2"], rel)["mean"],
+                 own_r2_reliable=ev._rel_stats(r2, rel)["mean"],
+                 frontier_topk_own=ev.topk_frontier(X, Y, tier.X_test, tier.Y_test, result["coef"], rel, folds,
+                                                    ridge["fold_coefs"] if "ridge" in solver.name else None),
+                 ridge_topk_jaccard_halves=ev.ridge_halves_stability(X, Y, rel, halves))
+        return S, {}, time.perf_counter() - t0
+    fold_paths, path = result.get("fold_paths"), result.get("path_coefs")
+    recomputed = fold_paths is None or path is None
+    if recomputed:
+        fold_paths = [solver.fit_path(np.ascontiguousarray(X[tr]), np.ascontiguousarray(Y[tr]), alphas).coefs
+                      for tr, va in folds]
+        path = solver.fit_path(X, Y, alphas).coefs
+    half_paths = [solver.fit_path(np.ascontiguousarray(X[h]), np.ascontiguousarray(Y[h]), alphas).coefs
+                  for h in halves]
+    S, per = ev.cv_analysis(tier, alphas, fold_paths, path, folds, half_paths, ridge)
+    S["paths_recomputed"] = recomputed
+    S["ridge_topk_jaccard_halves"] = ev.ridge_halves_stability(X, Y, rel, halves)
+    return S, per, time.perf_counter() - t0
 
 
 def _small(info, limit=2000):
@@ -275,7 +319,8 @@ def warmup(solver, tier, alphas, mode="small"):
 
 
 def run(solver_name, tier_name, task="P", solver_args=None, timeout=None, warmup_mode="small",
-        max_targets=None, evaluate=True, eval_alpha_stride=1, out=RESULTS, tag=None, verbose=True):
+        max_targets=None, evaluate=True, eval_alpha_stride=1, out=RESULTS, tag=None, verbose=True,
+        analysis=False):
     """Run one (solver, tier, task) and append a row to results.jsonl. Returns the row."""
     solver_args = dict(solver_args or {})
     solver = get_solver(solver_name, **solver_args)
@@ -291,7 +336,7 @@ def run(solver_name, tier_name, task="P", solver_args=None, timeout=None, warmup
                config=dict(tol=getattr(solver, "tol", None), max_iter=getattr(solver, "max_iter", None),
                            device=getattr(solver, "device", None), solver_args=solver_args,
                            n_alphas=N_ALPHAS, alpha_eps=ALPHA_EPS, n_folds=N_FOLDS if task == "CV" else None,
-                           fold_seed=FOLD_SEED if task == "CV" else None),
+                           fold_seed=FOLD_SEED if task == "CV" else None, analysis=bool(analysis)),
                hardware=hardware_info(), **git_info(), time_load_s=t_load)
     if verbose:
         print(f"[run {run_id}] {solver_name} on {tier_name} {tier.shape} task {task}", flush=True)
@@ -323,7 +368,7 @@ def run(solver_name, tier_name, task="P", solver_args=None, timeout=None, warmup
                     cvr = solver.fit_cv(X, Y, alphas, folds)
                     _sync(solver)
                 else:
-                    cvr = default_fit_cv(solver, X, Y, alphas, folds)
+                    cvr = default_fit_cv(solver, X, Y, alphas, folds, keep_paths=analysis)
                 t_tot = time.perf_counter() - t0
                 t_prep = float(cvr.get("info", {}).get("time_prepare_s", 0.0))
                 t_solve = t_tot - t_prep
@@ -375,6 +420,15 @@ def run(solver_name, tier_name, task="P", solver_args=None, timeout=None, warmup
             raw.update({k: v for k, v in per.items()})
             if result.get("cv_mse") is not None:
                 raw["cv_mse"] = np.asarray(result["cv_mse"])
+            if analysis:
+                try:
+                    A_s, A_per, A_t = run_analysis(solver, tier, X, Y, alphas, make_folds(X.shape[0]), result)
+                    row["analysis"] = A_s
+                    row["time_analysis_s"] = A_t
+                    raw.update({f"an_{k}": v for k, v in A_per.items()})
+                except Exception as e:  # noqa: BLE001
+                    row["analysis_error"] = f"{type(e).__name__}: {e}"
+                    row["analysis_traceback"] = traceback.format_exc()[-3000:]
         row["time_eval_s"] = time.perf_counter() - t0
         row["has_reference"] = ref is not None
     if raw:
