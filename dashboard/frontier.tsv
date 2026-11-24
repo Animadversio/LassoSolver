@@ -1,0 +1,31 @@
+method	k	r2
+Exact Lasso, plain path	10	0.114
+Exact Lasso, plain path	30	0.213
+Exact Lasso, plain path	100	0.312
+Exact Lasso, plain path	300	0.305
+Exact Lasso, plain path	1000	0.172
+Relaxed Lasso (ridge refit on support)	10	0.214
+Relaxed Lasso (ridge refit on support)	30	0.28
+Relaxed Lasso (ridge refit on support)	100	0.332
+Relaxed Lasso (ridge refit on support)	300	0.324
+Relaxed Lasso (ridge refit on support)	1000	0.305
+Hadamard u*v, top-k + refit	10	0.218
+Hadamard u*v, top-k + refit	30	0.254
+Hadamard u*v, top-k + refit	100	0.324
+Hadamard u*v, top-k + refit	300	0.32
+Hadamard u*v, top-k + refit	1000	0.314
+Prox-Adam, top-k + refit	10	0.199
+Prox-Adam, top-k + refit	30	0.267
+Prox-Adam, top-k + refit	100	0.315
+Prox-Adam, top-k + refit	300	0.333
+Prox-Adam, top-k + refit	1000	0.335
+Prox-SGD, top-k	10	0.071
+Prox-SGD, top-k	30	0.134
+Prox-SGD, top-k	100	0.232
+Prox-SGD, top-k	300	0.31
+Prox-SGD, top-k	1000	0.351
+IHT hard top-k + refit	10	0.209
+IHT hard top-k + refit	30	0.249
+IHT hard top-k + refit	100	0.285
+IHT hard top-k + refit	300	0.323
+IHT hard top-k + refit	1000	0.34

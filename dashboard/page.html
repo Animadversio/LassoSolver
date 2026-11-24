@@ -44,6 +44,13 @@
     <div class="ls-chart dash-skeleton" id="frontier-chart" data-draw="frontier-chart" data-source="results"></div>
   </section>
 
+  <section id="matched">
+    <h2>Test R² at a fixed number of nonzero weights, unit-100k</h2>
+    <p class="ls-muted">Each method is read at the same sparsity: k nonzero weights per channel. Mean test R² over the 20 reliable channels on a 658 / 164 fit / validation split of the training images; Ridge on all 100,352 units reaches 0.335 on this split (dashed line). The plain Lasso path does not reach 1,000 nonzeros, so its last point is about 650.</p>
+    <div class="ls-legend" data-draw="matched-legend" data-source="frontier"></div>
+    <div class="ls-chart dash-skeleton" id="matched-chart" data-draw="matched-chart" data-source="frontier"></div>
+  </section>
+
   <section id="time">
     <h2>Time for a full cross-validated fit, by solver</h2>
     <p class="ls-muted">Wall-clock seconds on a log scale, shorter is better. Runs are grouped by dataset tier and number of channels fitted, so bars in one group are comparable. Unit-basis tiers come first: they are the target; the PCA tiers are only a check against the old notebooks.</p>
@@ -66,7 +73,7 @@
     <p class="ls-muted">Test R² is the mean over channels of 1 − SSE/SST on held-out images, over all channels and over reliable channels only (split-half reliability of at least 0.5). Nonzeros is the mean number of nonzero weights per channel.</p>
     <div class="ls-scroll">
       <table id="results-table" data-source="results" data-row-key="id">
-        <thead><tr><th data-field="tier">Tier</th><th data-field="solver">Solver</th><th data-field="hardware">Hardware</th><th class="ls-num" data-field="targets">Channels</th><th class="ls-num" data-field="time_s">Time (s)</th><th class="ls-num" data-field="test_r2">Test R², all</th><th class="ls-num" data-field="test_r2_rel">Test R², reliable</th><th class="ls-num" data-field="nnz">Nonzeros</th><th data-field="source">Source</th><th data-field="note">Note</th></tr></thead>
+        <thead><tr><th data-field="tier">Tier</th><th data-field="solver">Solver</th><th data-field="variant">Variant</th><th data-field="hardware">Hardware</th><th class="ls-num" data-field="targets">Channels</th><th class="ls-num" data-field="time_s">Time (s)</th><th class="ls-num" data-field="test_r2">Test R², all</th><th class="ls-num" data-field="test_r2_rel">Test R², reliable</th><th class="ls-num" data-field="nnz">Nonzeros</th><th data-field="source">Source</th><th data-field="note">Note</th></tr></thead>
         <tbody data-draw="results-body"></tbody>
       </table>
     </div>
@@ -126,7 +133,7 @@ dash.draw('time-chart', (el) => {
       const gy = y, w = Math.max(2, x(d.time_s));
       const row = svg.append('g').style('cursor', 'default');
       row.append('rect').attr('x', 0).attr('y', gy).attr('width', W).attr('height', rowH).style('fill', 'transparent');
-      row.append('text').attr('x', 0).attr('y', gy + 12).text(d.solver);
+      row.append('text').attr('x', 0).attr('y', gy + 12).text(d.solver + (d.variant ? ' (' + d.variant + ')' : ''));
       row.append('text').attr('class', 'ls-sub').attr('x', W).attr('y', gy + 12).attr('text-anchor', 'end').text(d.hardware + (d.note && d.source.startsWith('harness') && d.note.includes(';') ? ' · ' + d.note.split(';')[0] : ''));
       row.append('rect').attr('x', 0).attr('y', gy + 18).attr('width', w).attr('height', 12).attr('rx', 2)
         .style('fill', d.device === 'gpu' ? GPU : CPU);
@@ -158,7 +165,7 @@ dash.draw('frontier-chart', (el) => {
   const short = (s) => s.replace(/^torch_|^cpu_/, '');
   const pts = d3.groups(rows, (d) => Math.round(Math.log10(d.nnz) * 12) + '|' + Math.round(d.test_r2_rel * 250)).map(([, rs]) => ({
     nnz: d3.mean(rs, (d) => d.nnz), r2: d3.mean(rs, (d) => d.test_r2_rel), rs: rs.sort((a, b) => a.time_s - b.time_s),
-    names: [...new Set(rs.map((d) => short(d.solver)))], gpu: rs.every((d) => d.device === 'gpu')}));
+    names: [...new Set(rs.map((d) => short(d.solver) + (d.variant ? ' (' + d.variant + ')' : '')))], gpu: rs.every((d) => d.device === 'gpu')}));
   const W = Math.max(280, el.clientWidth), H = 320, m = {l: 44, r: 16, t: 14, b: 38};
   const x = d3.scaleLog().domain([d3.min(pts, (d) => d.nnz) / 2, d3.max(pts, (d) => d.nnz) * 2]).range([m.l, W - m.r]);
   const y = d3.scaleLinear().domain([d3.min(pts, (d) => d.r2) - 0.01, d3.max(pts, (d) => d.r2) + 0.012]).range([H - m.b, m.t]);
@@ -188,6 +195,57 @@ dash.draw('frontier-chart', (el) => {
   }
 });
 
+
+const RIDGE_SPLIT_R2 = 0.335;
+const matchedSeries = () => {
+  const g = dash.data('frontier');
+  return g.status === 'ok' ? d3.groups(g.data, (d) => d.method).map(([name, v], i) => ({name, v: v.sort((a, b) => a.k - b.k), color: dash.colors[i % dash.colors.length]})) : null;
+};
+dash.draw('matched-legend', (el) => {
+  el.replaceChildren();
+  for (const s of matchedSeries() || []) {
+    const key = document.createElement('span'); key.className = 'ls-key';
+    const sw = document.createElement('span'); sw.className = 'ls-swatch'; sw.style.background = s.color;
+    key.append(sw, s.name); el.append(key);
+  }
+});
+dash.draw('matched-chart', (el) => {
+  const g = dash.data('frontier');
+  if (g.status === 'loading') return;
+  el.classList.remove('dash-skeleton');
+  el.replaceChildren();
+  const series = matchedSeries();
+  if (!series) { el.textContent = g.status === 'error' ? 'The matched-sparsity data failed to load.' : '—'; return; }
+  const W = Math.max(280, el.clientWidth), H = 320, m = {l: 44, r: 16, t: 14, b: 38};
+  const all = series.flatMap((s) => s.v);
+  const x = d3.scaleLog().domain([8, 1250]).range([m.l, W - m.r]);
+  const y = d3.scaleLinear().domain([0, Math.max(RIDGE_SPLIT_R2, d3.max(all, (d) => d.r2)) + 0.02]).range([H - m.b, m.t]);
+  const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H).attr('role', 'img')
+    .attr('aria-label', 'Lines of test R squared against number of nonzero weights per channel, one line per method, with Ridge as a reference line');
+  const ks = [10, 30, 100, 300, 1000], yt = y.ticks(5);
+  svg.append('g').selectAll('line').data(yt).join('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y).attr('y2', y).style('stroke', 'var(--cds-chart-grid)');
+  svg.append('g').selectAll('text').data(yt).join('text').attr('class', 'ls-sub').attr('x', m.l - 6).attr('y', (t) => y(t) + 4).attr('text-anchor', 'end').text(d3.format('.2f'));
+  svg.append('g').selectAll('text').data(ks).join('text').attr('class', 'ls-sub').attr('x', x).attr('y', H - m.b + 16).attr('text-anchor', 'middle').text(d3.format(','));
+  svg.append('text').attr('class', 'ls-sub').attr('x', W - m.r).attr('y', H - 4).attr('text-anchor', 'end').text('Nonzero weights per channel, k (log scale)');
+  svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(RIDGE_SPLIT_R2)).attr('y2', y(RIDGE_SPLIT_R2)).style('stroke', 'var(--cds-chart-reference)').style('stroke-dasharray', '5 4');
+  svg.append('text').attr('class', 'ls-sub').attr('x', m.l + 4).attr('y', y(RIDGE_SPLIT_R2) - 5).text('Ridge, all units: ' + RIDGE_SPLIT_R2);
+  const line = d3.line().x((d) => x(d.k)).y((d) => y(d.r2));
+  const tip = d3.select(el).append('div').attr('class', 'ls-tip').attr('hidden', '');
+  for (const s of series) {
+    svg.append('path').attr('d', line(s.v)).style('fill', 'none').style('stroke', s.color).style('stroke-width', 2);
+    svg.append('g').selectAll('circle').data(s.v).join('circle').attr('cx', (d) => x(d.k)).attr('cy', (d) => y(d.r2)).attr('r', 3.5).style('fill', s.color);
+  }
+  svg.append('g').selectAll('rect').data(ks).join('rect').attr('x', (k) => x(k) - 22).attr('y', m.t).attr('width', 44).attr('height', H - m.b - m.t).style('fill', 'transparent')
+    .on('pointermove', (ev, k) => {
+      tip.attr('hidden', null).html('');
+      tip.append('b').text(d3.format(',')(k) + ' nonzeros per channel');
+      const at = series.map((s) => ({name: s.name, d: s.v.find((d) => d.k === k)})).filter((e) => e.d).sort((a, b) => b.d.r2 - a.d.r2);
+      for (const e of at) tip.append('span').text(d3.format('.3f')(e.d.r2) + ' · ' + e.name);
+      const tw = tip.node().offsetWidth;
+      tip.style('left', Math.max(0, Math.min(x(k) + 14, W - tw)) + 'px').style('top', m.t + 'px');
+    }).on('pointerleave', () => tip.attr('hidden', ''));
+});
+
 const cell = (tr, text, cls) => { const td = tr.insertCell(); td.textContent = text == null || text === '' ? '' : String(text); if (cls) td.className = cls; return td; };
 const failRow = (tb, n, text) => { const td = tb.insertRow().insertCell(); td.colSpan = n; td.textContent = text; };
 
@@ -210,12 +268,12 @@ dash.draw('results-body', (tb) => {
   const g = dash.data('results');
   tb.replaceChildren();
   if (g.status === 'loading') return;
-  if (g.status !== 'ok') { failRow(tb, 10, g.status === 'error' ? 'The results failed to load.' : '—'); return; }
+  if (g.status !== 'ok') { failRow(tb, 11, g.status === 'error' ? 'The results failed to load.' : '—'); return; }
   const rank = (k) => (k.startsWith('unit') ? 0 : k.startsWith('syn') ? 1 : k.startsWith('pca1k-old') ? 3 : 2);
   const rows = [...g.data].sort((a, b) => rank(a.tier) - rank(b.tier) || d3.ascending(a.tier, b.tier) || d3.descending(a.targets, b.targets) || d3.ascending(a.time_s, b.time_s));
   for (const d of rows) {
     const tr = tb.insertRow(); tr.dataset.key = encodeURIComponent(d.id);
-    cell(tr, d.tier); cell(tr, d.solver, 'ls-wide'); cell(tr, d.hardware);
+    cell(tr, d.tier); cell(tr, d.solver); cell(tr, d.variant); cell(tr, d.hardware);
     cell(tr, d.targets, 'ls-num'); cell(tr, d.time_s, 'ls-num'); cell(tr, d.test_r2, 'ls-num'); cell(tr, d.test_r2_rel, 'ls-num'); cell(tr, d.nnz, 'ls-num');
     cell(tr, d.source); cell(tr, d.note, 'ls-note');
   }

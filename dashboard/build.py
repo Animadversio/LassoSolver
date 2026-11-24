@@ -1,8 +1,8 @@
 """Convert the dashboard's editable TSV tables to the JSON files that get uploaded."""
 import csv, json, pathlib, re
 here = pathlib.Path(__file__).parent
-NUM = {"targets", "time_s", "test_r2", "test_r2_rel", "nnz"}
-for name in ("ideas", "results"):
+NUM = {"targets", "time_s", "test_r2", "test_r2_rel", "nnz", "k", "r2"}
+for name in ("ideas", "results", "frontier"):
     rows = []
     for r in csv.DictReader(open(here / f"{name}.tsv"), delimiter="\t"):
         row = {k: (None if v == "" else float(v)) if k in NUM else v for k, v in r.items()}
