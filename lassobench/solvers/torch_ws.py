@@ -620,6 +620,9 @@ def _solve_batched(X, Y, alphas, masks, tol, max_outer=100, min_ws=64, inner_rat
     return rows, cols, vals, info
 
 
+_CV_ONLY = ("select", "cv_stop", "cv_batch")
+
+
 class TorchWS(Solver):
     name = "torch_ws"
     device = "cuda"
@@ -631,8 +634,9 @@ class TorchWS(Solver):
         n, p = X.shape
         T = Y.shape[1]
         masks = np.ones((1, n), dtype=np.float32)
+        kw = {k: v for k, v in self.kw.items() if k not in _CV_ONLY}
         rows, cols, vals, info = _solve_batched(X, Y, np.asarray(alphas), masks, self.tol,
-                                                max_ep=self.max_iter, **self.kw)
+                                                max_ep=self.max_iter, **kw)
         coefs = to_csc_list(rows, cols, vals, len(rows), p, T)
         return PathResult(coefs=coefs, info=info)
 
