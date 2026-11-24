@@ -40,7 +40,7 @@
 
   <section id="frontier">
     <h2>Prediction against sparsity on unit-100k</h2>
-    <p class="ls-muted">Each point is one method's cross-validated fit on the layer4 unit basis (100,352 features, 64 channels, 20 reliable). Up and to the left is better: higher test R² on reliable channels with fewer nonzero weights per channel. Ridge uses every feature and is the R² reference.</p>
+    <p class="ls-muted">Each point is one method's cross-validated fit on the layer4 unit basis (100,352 features, 64 channels, 20 reliable). Up and to the left is better: higher test R² on reliable channels with fewer nonzero weights per channel. Ridge uses every feature and is the R² reference. Rows named fact_ are 5-member ensembles, which is worth about 0.03 R² by itself (the same ensembling lifts Lasso from 0.31 to 0.34), so compare them with fact_lasso_members rather than with the single Lasso fits.</p>
     <div class="ls-chart dash-skeleton" id="frontier-chart" data-draw="frontier-chart" data-source="results"></div>
   </section>
 
