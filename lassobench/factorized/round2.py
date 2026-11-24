@@ -636,7 +636,7 @@ def main(argv=None):
         _log("QUICK MODE")
     parts = a.parts.split(",")
     ks = [int(k) for k in a.splits.split(",")] if ("splits" in parts or "nuclear" in parts) else []
-    if any(p in parts for p in ("stab", "ablate", "timing")) or "nuclear" in parts:
+    if any(p in parts for p in ("stab", "ablate", "timing")):
         ks = sorted(set(ks) | {0})
     t0 = time.perf_counter()
     d, S = load_splits(a.tier, ks)
@@ -649,7 +649,7 @@ def main(argv=None):
             if str(k) in a.splits.split(","):
                 part_split(a.tier, S[k])
     if "nuclear" in parts:
-        part_nuclear(a.tier, {k: S[k] for k in ks})
+        part_nuclear(a.tier, {k: S[k] for k in ks if str(k) in a.splits.split(",")})
     if "stab" in parts:
         part_stab(a.tier, S[0])
     if "ablate" in parts:
