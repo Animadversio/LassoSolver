@@ -321,7 +321,8 @@ __global__ void cd2(
     const double* __restrict__ c, const double* __restrict__ dg, double* __restrict__ w_io,
     const double* __restrict__ lam, const double* __restrict__ yy, const double* __restrict__ tol,
     const int max_ep, const int act_passes, int* __restrict__ ep_out, double* __restrict__ gap_out,
-    const int anderson, double* __restrict__ snaps, float* __restrict__ GA, const int acap, const int snap_every)
+    const int anderson, double* __restrict__ snaps, float* __restrict__ GA, const int acap, const int snap_every,
+    const double* __restrict__ l2v)
 {
     extern __shared__ double sh[];
     const int b = blockIdx.x, tid = threadIdx.x, bs = blockDim.x;
@@ -339,7 +340,7 @@ __global__ void cd2(
         w[i] = w_io[(long long)b * K + i]; di[i] = 1.0 / dg[(long long)b * K + i]; ps[i] = pos[(long long)b * K + i];
     }
     __syncthreads();
-    const double lb = lam[b], yb = yy[b], tb = tol[b];
+    const double lb = lam[b], yb = yy[b], tb = tol[b], l2 = l2v[b];   // l2: elastic-net ridge term (augmented Lasso)
     int ep = 0;
     double gap_rel = 1e300;
     int ismax[10] = {0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
@@ -359,6 +360,7 @@ __global__ void cd2(
             }
         }
         __syncthreads();
+        if (l2 != 0.0) { for (int i = tid; i < k; i += bs) q[i] -= l2 * w[i]; __syncthreads(); }
         // ---- gap ----
         {
             double v[4] = {0, 0, 0, 0};
@@ -386,7 +388,7 @@ __global__ void cd2(
             const double dl = s_delta;
             if (dl != 0.0) {
                 const GT* row = Gb + (long long)ps[j] * ldg;
-                for (int i = tid; i < k; i += bs) q[i] -= (double)row[ps[i]] * dl;
+                for (int i = tid; i < k; i += bs) q[i] -= ((double)row[ps[i]] + (i == j ? l2 : 0.0)) * dl;
             }
             __syncthreads();
         }
@@ -400,7 +402,7 @@ __global__ void cd2(
         if (compact) {
             for (int a = 0; a < na; ++a) {
                 const GT* row = Gb + (long long)ps[act[a]] * ldg;
-                for (int t = tid; t < na; t += bs) GAb[(long long)a * acap + t] = (float)row[ps[act[t]]];
+                for (int t = tid; t < na; t += bs) GAb[(long long)a * acap + t] = (float)((double)row[ps[act[t]]] + (t == a ? l2 : 0.0));
             }
             __syncthreads();
         }
@@ -444,7 +446,7 @@ __global__ void cd2(
                     const double dl = s_delta;
                     if (dl != 0.0) {
                         const GT* row = Gb + (long long)ps[j] * ldg;
-                        for (int t = tid; t < na; t += bs) q[act[t]] -= (double)row[ps[act[t]]] * dl;
+                        for (int t = tid; t < na; t += bs) q[act[t]] -= ((double)row[ps[act[t]]] + (act[t] == j ? l2 : 0.0)) * dl;
                     }
                     __syncthreads();
                 }
@@ -545,7 +547,7 @@ def _get_kernel2(gt, mp):
 
 
 def cd2_gram_batched(G, goff, ldg, pos, kk, c, dg, w, lam, yy, tol, max_ep=2000, act_passes=25, anderson=True,
-                     acap=None, ga_bytes=2 ** 33, snap_every=5):
+                     acap=None, ga_bytes=2 ** 33, snap_every=5, l2=None):
     """Kernel v2 (see _KERNEL2_SRC). Same interface as cd_gram_batched; `acap` = compaction capacity."""
     import cupy as cp
     B, K = w.shape
@@ -570,7 +572,8 @@ def cd2_gram_batched(G, goff, ldg, pos, kk, c, dg, w, lam, yy, tol, max_ep=2000,
     torch.cuda.current_stream().synchronize()
     kern((B,), (bs,), (a(G), a(goff), np.int64(ldg), a(pos), a(kk), np.int32(K), a(c), a(dg), a(w),
                        a(lam), a(yy), a(tol), np.int32(max_ep), np.int32(act_passes), a(ep), a(gap),
-                       np.int32(1 if anderson else 0), a(snaps), a(GA), np.int32(acap), np.int32(snap_every)),
+                       np.int32(1 if anderson else 0), a(snaps), a(GA), np.int32(acap), np.int32(snap_every),
+                       a(l2 if l2 is not None else torch.zeros(B, dtype=torch.float64, device=dev))),
          shared_mem=smem)
     cp.cuda.get_current_stream().synchronize()
     return ep, gap
@@ -613,12 +616,16 @@ class HostX:
         return torch.from_numpy(np.ascontiguousarray(self.X[:, ii], dtype=np.float32)).to(dev)
 
 
-def full_corr_stats(Xd, Rt, M, thr=None, chunk_bytes=2 ** 31):
+def full_corr_stats(Xd, Rt, M, thr=None, chunk_bytes=2 ** 31, inv_norm=None, lam=None, corr=None):
     """Stats of C = R^T X (B, p) computed in feature chunks.
 
     Xd: (n, p) float32 (on GPU, or a host tensor that is streamed chunk-wise if `stream=True`). Rt: (B, n) float32 residuals (already masked per fold).
     M: number of top |c_j| features to keep per problem.
     thr: optional (B,) thresholds; returns count of |c_j| > thr_b (strong rule).
+    corr: optional (feature ids, problem idx, values): c[b, j] -= value before |.| (elastic net: the
+        augmented-Lasso correlation is x_j^T r - l2 w_j on the support).
+    inv_norm, lam: if given, candidates are ranked by the celer score (|c_j| - lam_b) / ||x_j||
+    (distance to the dual constraint, valid for unnormalized columns) instead of |c_j|.
     Returns dict(qmax (B,) float64, top_idx (B, M) int64, top_val (B, M) float32, n_strong (B,)).
     """
     p = Xd.shape[1]
@@ -631,17 +638,25 @@ def full_corr_stats(Xd, Rt, M, thr=None, chunk_bytes=2 ** 31):
     nst = torch.zeros(B, dtype=torch.int64, device=dev) if thr is not None else None
     tv = ti = None
     thr32 = thr.to(torch.float32)[:, None] if thr is not None else None
+    lam32 = lam.to(torch.float32)[:, None] if lam is not None else None
     if isinstance(Xd, HostX):
         it = Xd.iter_blocks(dev)
     else:
         it = ((j0, Xd[:, j0:j0 + pc]) for j0 in range(0, p, pc))
     for j0, Xc in it:
-        Cc = (Rt @ Xc).abs_()          # (B, pc)
+        Cc = Rt @ Xc                   # (B, pc)
+        if corr is not None:
+            cid, cb, cv = corr
+            sel = (cid >= j0) & (cid < j0 + Cc.shape[1])
+            if sel.any():
+                Cc.index_put_((cb[sel], cid[sel] - j0), -cv[sel], accumulate=True)
+        Cc.abs_()
         qmax = torch.maximum(qmax, Cc.max(dim=1).values)
         if thr is not None:
             nst += (Cc > thr32).sum(dim=1)
         if M > 0:
-            v, i = torch.topk(Cc, min(M, Cc.shape[1]), dim=1, sorted=False)
+            Sc = Cc if inv_norm is None else (Cc - lam32) * inv_norm[j0:j0 + Cc.shape[1]][None, :]
+            v, i = torch.topk(Sc, min(M, Sc.shape[1]), dim=1, sorted=False)
             i += j0
             if tv is None:
                 tv, ti = v, i
