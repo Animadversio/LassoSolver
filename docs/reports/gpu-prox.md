@@ -231,7 +231,7 @@ Harness rows (H200, tol 1e-4 where applicable; the unit-800k tier as served to t
 | unit-800k | torch_prox_sgd (300 ep) | P | 82.8 | gap median 0.23, nnz median 1.7e5 |
 | unit-800k | torch_prox_adam (300 ep, lr 1e-2) | P | 115.6 | diverged: gap median 38.5, nnz median 5.8e5 |
 | unit-800k | torch_prox_adam_mb (bs 128, 30 ep, lr 1e-2) | P | 68.4 | diverged: gap median 201 |
-| unit-800k | torch_fista screen | P | UNIT800K_FISTA | |
+| unit-800k | torch_fista screen | P | timeout (3000) | recorded as `status=timeout`; torch_ws: 48.7 s |
 
 - The first unit-800k gradient-optimizer rows errored in sparse extraction (`torch.nonzero` refuses tensors with
   more than 2^31 elements; a wave of ~9000 slots x 780k features). Fixed in `_torch_common.extract_rows` (chunked);
@@ -241,7 +241,8 @@ Harness rows (H200, tol 1e-4 where applicable; the unit-800k tier as served to t
   step 1/L is stable on both tiers. Not tuned further (the round-2 decision below makes it moot).
 - The A100 FISTA harness job (63236137) was cancelled before it started: after the round-1 decision (full-p FISTA
   dropped for the unit basis) it would only spend ~10 GPU-hours confirming a known timeout. A100 numbers for
-  FISTA exist on synthetic data (section 3) and pca1k-scale problems.
+  FISTA exist on synthetic data (section 3) and pca1k-scale problems. The rest of the H200 FISTA job (unit-800k
+  P without screening and CV) was cancelled after the screened P timed out, for the same reason.
 
 ## 9. Keep / drop
 
