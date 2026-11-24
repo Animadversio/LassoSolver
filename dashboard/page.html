@@ -54,6 +54,7 @@
   <section id="time">
     <h2>Time for a full cross-validated fit, by solver</h2>
     <p class="ls-muted">Wall-clock seconds on a log scale, shorter is better. Runs are grouped by dataset tier and number of channels fitted, so bars in one group are comparable. Unit-basis tiers come first: they are the target; the PCA tiers are only a check against the old notebooks.</p>
+    <p class="ls-muted" id="time-definition">What one timed run covers, using the 11.5 s working-set run on unit-100k as the example: one layer's features (resnet50_robust layer4, 100,352 units, 822 training images), all 64 channels fitted as independent Lasso problems, 5-fold cross-validation plus a final refit on all training images (64 × 6 regularization paths), each channel choosing its own alpha, then scoring on the 206 held-out test images. The clock includes moving the features to the GPU and all precomputation. The alpha grid has 50 values, but cross-validation stops a channel's path once its held-out error has clearly passed its minimum, so about the first half of the grid is solved; the selected alphas are the same as without early stopping, which takes about 34 s. Hardware is an H200; the same run takes 13.7 s on an A100 and has not been run on an H100.</p>
     <div class="ls-legend"><span class="ls-key"><span class="ls-swatch" data-draw="sw-cpu"></span>CPU</span><span class="ls-key"><span class="ls-swatch" data-draw="sw-gpu"></span>GPU</span></div>
     <div class="ls-chart dash-skeleton" id="time-chart" data-draw="time-chart" data-source="results"></div>
   </section>
