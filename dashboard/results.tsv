@@ -1,0 +1,30 @@
+tier	solver	hardware	device	targets	time_s	test_r2	test_r2_rel	nnz	source	note
+pca1k-old	sklearn LassoCV per target	16 CPU threads	cpu	64	112.5	0.147		52	2024-12 dev notebook	Unstandardized X, 100 alphas x 5 folds
+pca1k-old	celer LassoCV per target	16 CPU threads	cpu	64	178.8				2024-12 dev notebook	No gain from multithreading
+pca1k-old	celer LassoCV per target	1 CPU thread	cpu	64	887				2024-12 dev notebook	About 15 min
+pca1k-old	sklearn MultiTaskLassoCV	16 CPU threads	cpu	64	11.8	0.149		183	2024-12 dev notebook	Shared row sparsity across channels: a different problem
+pca1k-old	celer MultiTaskLassoCV	16 CPU threads	cpu	64	50.2				2024-12 dev notebook	Shared row sparsity across channels
+pca1k-old	RidgeCV	16 CPU threads	cpu	64	0.2	0.162		1000	2024-12 notebooks	Dense weights; R2 recorded with resnet50 features
+pca1k-old	sklearn LassoCV	16 CPU threads	cpu	1	4.0	0.188		92	2024-12 dev notebook	Single channel
+pca1k-old	celer LassoCV	16 CPU threads	cpu	1	7.2	0.188		92	2024-12 dev notebook	Single channel
+pca1k-old	cuML Lasso via GridSearchCV	GPU (model not recorded)	gpu	1	302.8	0.188		92	2024-12 dev notebook	500 tiny GPU fits run one at a time
+syn-s	torch_fista	H200	gpu	16	8.5	0.381	0.381	134	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=20000
+syn-s	torch_fista	H200	gpu	16	10.7	0.381	0.381	134	harness 2026-11-23	cv_refit=after, tol=0.0001; 50 alphas x 5 folds, p=20000
+pca1k	torch_fista	H200	gpu	64	2.42	0.114	0.258	44.6	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=1000
+pca1k	torch_fista	H200	gpu	64	2.61	0.114	0.258	44.6	harness 2026-11-23	cv_refit=after, tol=0.0001; 50 alphas x 5 folds, p=1000
+syn-s	torch_ws	A100-SXM4-80GB	gpu	16	13.5	0.381	0.381	134	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=20000
+pca1k	cpu_sklearn_cd	32 CPU threads	cpu	64	29.1	0.114	0.258	44.6	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=1000
+pca1k	torch_ws	A100-SXM4-80GB	gpu	64	25.3	0.114	0.258	44.5	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=1000
+pca1k	cpu_celer	32 CPU threads	cpu	64	39.3	0.114	0.258	44.5	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=1000
+syn-s	torch_ws	H200	gpu	16	10.6	0.381	0.381	134	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=20000
+pca1k	cpu_ridgecv	32 CPU threads	cpu	64	0.75	-5.93	-2.43	1e+03	harness 2026-11-23	50 alphas x 5 folds, p=1000
+pca1k-raw	cpu_sklearn_cd	32 CPU threads	cpu	64	20.8	0.147	0.309	49.9	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=1000
+pca1k-raw	cpu_celer	32 CPU threads	cpu	64	25.2	0.147	0.309	49.8	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=1000
+pca1k-raw	cpu_ridgecv	32 CPU threads	cpu	64	0.529	-7.85	-2.92	1e+03	harness 2026-11-23	50 alphas x 5 folds, p=1000
+pca1k	torch_ws	H200	gpu	64	19	0.114	0.258	44.5	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=1000
+unit-100k	torch_ws	A100-SXM4-80GB	gpu	64	171	0.157	0.326	129	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=100352
+unit-100k	torch_ws	H200	gpu	64	33.2	0.157	0.326	129	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=100352
+pca1k	cpu_sklearn_lassocv_legacy	32 CPU threads	cpu	64	443	0.116	0.263	44.5	harness 2026-11-23	n_jobs=16; 50 alphas x 5 folds, p=1000
+unit-800k	torch_ws	H200	gpu	383	75.8	0.0148	0.405	31	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=779947
+unit-800k	torch_ws	A100-SXM4-80GB	gpu	383	240	0.0148	0.405	31	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=779947
+pca1k-raw	cpu_sklearn_lassocv_legacy	32 CPU threads	cpu	64	651	0.147	0.306	51.6	harness 2026-11-23	n_jobs=16; 50 alphas x 5 folds, p=1000

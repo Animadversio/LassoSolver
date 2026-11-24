@@ -1,4 +1,4 @@
-# Lasso benchmark spec (v0)
+# Lasso benchmark spec (v0.1)
 
 Owned by the coordinator session. Sub-sessions: propose changes in your report, do not edit.
 
@@ -73,3 +73,20 @@ dict the harness discovers (`SOLVERS = {"name": Class}` at module level). Helper
   slower than CPU (500 tiny GPU fits through joblib; never batched).
 - Full unit basis (1e5-8e5 features) was never attempted with Lasso. That is the gap this repo fills.
 - X was not standardized then (PCA column std 1..48), a likely cause of the slow/non-converging fits.
+
+## 7. Changes in v0.1 (2026-11-23, after the first round)
+
+- **Headline statistical metric is test R2 over reliable channels** (`r2_test_mean_reliable`, reliability >= 0.5).
+  The all-channel mean is dominated by unreliable channels (unit-800k: 0.015 over all 383 channels vs 0.405 over
+  reliable ones) and is reported only as a secondary number.
+- **Feature scaling is an open question, not a given.** On PCA features z-scoring lowered test R2 (0.147 -> 0.114).
+  Every real tier therefore gets a `-raw` variant (columns centered, one global scale, no per-column z-score), and
+  solvers must not assume unit column variance: use per-column norms where the algorithm needs them (CD step sizes,
+  screening rules). The contract in `api.py` is otherwise unchanged. Which scaling becomes the default is decided
+  from the unit-basis comparison.
+- **A baseline has to pass a sanity check before it counts.** RidgeCV must give positive test R2 on reliable
+  channels on `pca1k-raw` (old notebooks: about 0.16 over all channels); a negative value is a harness bug.
+- **Leaderboard rows need committed solver code.** A row counts only if the solver file is committed at the row's
+  `git_hash` (not listed in `git_dirty`). Dev runs are welcome in `results.jsonl` but are not ranked.
+- **Like-for-like comparisons.** Rank at a fixed tolerance (relative gap 1e-4) on the same hardware, and always
+  include at least one CPU reference (sklearn CD or celer) on the same tier, or its recorded timeout.

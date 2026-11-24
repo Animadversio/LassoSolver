@@ -57,10 +57,10 @@
 
   <section id="results">
     <h2>All timed runs</h2>
-    <p class="ls-muted">Test R² is the mean over channels of 1 − SSE/SST on held-out images. Nonzero fraction is the share of weights that are not exactly zero.</p>
+    <p class="ls-muted">Test R² is the mean over channels of 1 − SSE/SST on held-out images, over all channels and over reliable channels only (split-half reliability of at least 0.5). Nonzeros is the mean number of nonzero weights per channel.</p>
     <div class="ls-scroll">
       <table id="results-table" data-source="results" data-row-key="id">
-        <thead><tr><th data-field="tier">Tier</th><th data-field="solver">Solver</th><th data-field="hardware">Hardware</th><th class="ls-num" data-field="targets">Channels</th><th class="ls-num" data-field="time_s">Time (s)</th><th class="ls-num" data-field="test_r2">Test R²</th><th class="ls-num" data-field="density">Nonzero fraction</th><th data-field="source">Source</th><th data-field="note">Note</th></tr></thead>
+        <thead><tr><th data-field="tier">Tier</th><th data-field="solver">Solver</th><th data-field="hardware">Hardware</th><th class="ls-num" data-field="targets">Channels</th><th class="ls-num" data-field="time_s">Time (s)</th><th class="ls-num" data-field="test_r2">Test R², all</th><th class="ls-num" data-field="test_r2_rel">Test R², reliable</th><th class="ls-num" data-field="nnz">Nonzeros</th><th data-field="source">Source</th><th data-field="note">Note</th></tr></thead>
         <tbody data-draw="results-body"></tbody>
       </table>
     </div>
@@ -119,7 +119,7 @@ dash.draw('time-chart', (el) => {
       const row = svg.append('g').style('cursor', 'default');
       row.append('rect').attr('x', 0).attr('y', gy).attr('width', W).attr('height', rowH).style('fill', 'transparent');
       row.append('text').attr('x', 0).attr('y', gy + 12).text(d.solver);
-      row.append('text').attr('class', 'ls-sub').attr('x', W).attr('y', gy + 12).attr('text-anchor', 'end').text(d.hardware);
+      row.append('text').attr('class', 'ls-sub').attr('x', W).attr('y', gy + 12).attr('text-anchor', 'end').text(d.hardware + (d.note && d.source.startsWith('harness') && d.note.includes(';') ? ' · ' + d.note.split(';')[0] : ''));
       row.append('rect').attr('x', 0).attr('y', gy + 18).attr('width', w).attr('height', 12).attr('rx', 2)
         .style('fill', d.device === 'gpu' ? GPU : CPU);
       row.append('text').attr('x', w + 6).attr('y', gy + 28).text(fmtTime(d.time_s));
@@ -128,7 +128,7 @@ dash.draw('time-chart', (el) => {
         tip.attr('hidden', null).html('');
         tip.append('b').text(d.solver);
         tip.append('span').text(d.hardware + ' · ' + fmtTime(d.time_s));
-        if (d.test_r2 != null) tip.append('span').text('Test R² ' + d.test_r2 + (d.density != null ? ' · nonzero ' + d.density : ''));
+        if (d.test_r2 != null) tip.append('span').text('Test R² ' + d.test_r2 + (d.test_r2_rel != null ? ' (reliable ' + d.test_r2_rel + ')' : '') + (d.nnz != null ? ' · ' + d.nnz + ' nonzeros' : ''));
         if (d.note) tip.append('span').text(d.note);
         const tw = tip.node().offsetWidth;
         tip.style('left', Math.max(0, Math.min(ev.clientX - box.left + 12, box.width - tw)) + 'px').style('top', (gy + rowH + 2) + 'px');
@@ -160,12 +160,12 @@ dash.draw('results-body', (tb) => {
   const g = dash.data('results');
   tb.replaceChildren();
   if (g.status === 'loading') return;
-  if (g.status !== 'ok') { failRow(tb, 9, g.status === 'error' ? 'The results failed to load.' : '—'); return; }
+  if (g.status !== 'ok') { failRow(tb, 10, g.status === 'error' ? 'The results failed to load.' : '—'); return; }
   const rows = [...g.data].sort((a, b) => d3.ascending(a.tier, b.tier) || d3.descending(a.targets, b.targets) || d3.ascending(a.time_s, b.time_s));
   for (const d of rows) {
     const tr = tb.insertRow(); tr.dataset.key = encodeURIComponent(d.id);
     cell(tr, d.tier); cell(tr, d.solver, 'ls-wide'); cell(tr, d.hardware);
-    cell(tr, d.targets, 'ls-num'); cell(tr, d.time_s, 'ls-num'); cell(tr, d.test_r2, 'ls-num'); cell(tr, d.density, 'ls-num');
+    cell(tr, d.targets, 'ls-num'); cell(tr, d.time_s, 'ls-num'); cell(tr, d.test_r2, 'ls-num'); cell(tr, d.test_r2_rel, 'ls-num'); cell(tr, d.nnz, 'ls-num');
     cell(tr, d.source); cell(tr, d.note, 'ls-note');
   }
 });
