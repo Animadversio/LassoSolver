@@ -33,6 +33,9 @@ from lassobench.data import (PCA_PKL, load_paul_neural, neural_meta, old_split, 
 FEAT_DIR = os.path.join(STORE, "cache", "features")
 LAYERS = {"unit-100k": ("layer4", 0, "paul_20241119-20241122"),
           "unit-800k": ("layer1", 0, "paul_241119-241122")}
+# unit-800k's 383 channels (l_STS array) have only 3 channels with reliability >= 0.5; the c64 variant uses the
+# 64-ch l_cIT subject (20 reliable, same as unit-100k) on the same layer1 features.
+LAYERS["unit-800k-c64"] = ("layer1", 0, "paul_20241119-20241122")
 LAYERS.update({f"{k}-raw": v for k, v in list(LAYERS.items())})
 
 

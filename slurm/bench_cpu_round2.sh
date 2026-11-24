@@ -16,3 +16,5 @@ $SUB -J r2-u800k-raw $S \
   "--solver cpu_ridgecv --tier unit-800k --task CV --tag round2" \
   "--solver cpu_ridgecv --tier unit-800k-raw --task CV --tag round2" \
   "--solver cpu_celer --tier unit-800k-raw --task CV --solver-args tol=1e-4 --timeout $T --tag round2"
+$SUB -J r2-u800k-c64 $S "--solver cpu_ridgecv --tier unit-800k-c64 --task CV --tag round2" \
+  "--solver cpu_celer --tier unit-800k-c64 --task CV --solver-args tol=1e-4 --timeout $T --tag round2"
