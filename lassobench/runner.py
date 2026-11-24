@@ -110,12 +110,13 @@ def hardware_info():
 class MemSampler:
     """Samples host RSS (process + children) and this process's GPU memory (NVML) in a thread."""
 
-    def __init__(self, interval=0.05):
+    def __init__(self, interval=0.2):
         import psutil
         self.proc = psutil.Process()
         self.interval = interval
         self.peak_rss = 0
         self.peak_gpu = 0
+        self._pss_ok, self._use_pss = True, False
         self._stop = threading.Event()
         self._nvml = None
         try:
@@ -126,13 +127,25 @@ class MemSampler:
         except Exception:  # noqa: BLE001
             self._nvml = None
 
+    def _mem(self, p):
+        # PSS (shared pages split across processes) when there are worker processes, else RSS.
+        # Summing RSS over workers that share a memmap of X overcounts it once per worker.
+        if self._use_pss:
+            try:
+                return p.memory_full_info().pss
+            except Exception:  # noqa: BLE001
+                self._use_pss = False
+        return p.memory_info().rss
+
     def _rss(self):
         tot = 0
         try:
-            tot = self.proc.memory_info().rss
-            for c in self.proc.children(recursive=True):
+            kids = self.proc.children(recursive=True)
+            self._use_pss = bool(kids) and self._pss_ok
+            tot = self._mem(self.proc)
+            for c in kids:
                 try:
-                    tot += c.memory_info().rss
+                    tot += self._mem(c)
                 except Exception:  # noqa: BLE001
                     pass
         except Exception:  # noqa: BLE001
@@ -179,7 +192,7 @@ class MemSampler:
             self.torch_peak = torch.cuda.max_memory_allocated()
 
     def summary(self):
-        return dict(ram_before_gb=self.rss_before / 2**30, peak_ram_gb=self.peak_rss / 2**30,
+        return dict(ram_before_gb=self.rss_before / 2**30, peak_ram_gb=self.peak_rss / 2**30, ram_metric="rss+pss(workers)",
                     peak_gpu_mem_gb=(max(self.peak_gpu, self.torch_peak or 0) / 2**30) if
                     (self.peak_gpu or self.torch_peak) else None)
 
