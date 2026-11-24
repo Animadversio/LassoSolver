@@ -12,7 +12,8 @@ dropped, Y z-scored on training rows. Raw features cached under STORE/cache/feat
 Sanity check: the top principal components of our layer4.B0 features must match the pickle's pca1000 columns
 (same images, same order, same model) -> |corr| ~ 1.
 
-Usage: python scripts/build_unit_tiers.py [unit-100k] [unit-800k] [--overwrite]
+Usage: python scripts/build_unit_tiers.py [unit-100k] [unit-800k] [unit-100k-raw] [unit-800k-raw] [--overwrite]
+"-raw" tiers (spec v0.1): same features/rows/columns kept, centered on train rows, one global scale.
 """
 import os
 import pickle
@@ -32,6 +33,7 @@ from lassobench.data import (PCA_PKL, load_paul_neural, neural_meta, old_split, 
 FEAT_DIR = os.path.join(STORE, "cache", "features")
 LAYERS = {"unit-100k": ("layer4", 0, "paul_20241119-20241122"),
           "unit-800k": ("layer1", 0, "paul_241119-241122")}
+LAYERS.update({f"{k}-raw": v for k, v in list(LAYERS.items())})
 
 
 def extract(fps, layers, batch_size=64):
@@ -99,13 +101,15 @@ def main():
         R = nd["resp"]
         X = raw[(stage, blk)]
         t0 = time.time()
-        Xtr, Xte, keep, mu, sd = standardize_X(X[tr], X[te])
+        raw_tier = name.endswith("-raw")
+        Xtr, Xte, keep, mu, sd = standardize_X(X[tr], X[te], per_column=not raw_tier)
         Ytr, Yte, ymu, ysd = standardize_Y(R[tr], R[te])
         meta = neural_meta(nd, tr, te)
         meta.update(model="resnet50_robust", layer=f".{stage}.Bottleneck{blk}", features="unit basis (flattened C,H,W)",
                     n_features_raw=int(X.shape[1]), n_features_kept=int(keep.sum()),
                     n_constant_dropped=int((~keep).sum()), image_source=PCA_PKL, y_mean=ymu, y_std=ysd,
-                    sanity_pc_corr_layer4B0=pc_corr, frac_zero_entries=float(np.mean(np.asarray(X[tr]) == 0)))
+                    sanity_pc_corr_layer4B0=pc_corr, x_standardized=not raw_tier,
+                    x_scaling=("centered, one global scale %.6g" % sd[keep][0]) if raw_tier else "z-score per column", frac_zero_entries=float(np.mean(np.asarray(X[tr]) == 0)))
         save_tier(name, Xtr, Ytr, Xte, Yte, meta, overwrite=ow)
         np.save(os.path.join(tier_dir(name), "kept_columns.npy"), np.flatnonzero(keep))
         print(f"{name}: X {Xtr.shape} (dropped {(~keep).sum()} constant), Y {Ytr.shape}, "

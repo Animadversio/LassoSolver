@@ -78,8 +78,13 @@ def load_tier(name: str, mmap: bool = True, max_targets: int | None = None) -> T
 
 # ----------------------------------------------------------------------------- preprocessing
 
-def standardize_X(X_train, X_test, eps=1e-6, chunk=65536):
-    """z-score columns on training rows; drop (near-)constant columns. Returns (Xtr, Xte, keep, mu, sd)."""
+def standardize_X(X_train, X_test, eps=1e-6, chunk=65536, per_column=True):
+    """z-score columns on training rows; drop (near-)constant columns. Returns (Xtr, Xte, keep, mu, sd).
+
+    per_column=False ("-raw" tiers, spec v0.1): center columns, divide all by ONE global scale
+    sqrt(mean kept-column variance), so relative column scales are preserved; returned sd is that scalar
+    broadcast to the kept columns' denominator.
+    """
     p = X_train.shape[1]
     mu = np.empty(p, np.float64)
     sd = np.empty(p, np.float64)
@@ -89,6 +94,8 @@ def standardize_X(X_train, X_test, eps=1e-6, chunk=65536):
         sd[j:j + chunk] = c.std(0)
     keep = sd > eps * max(1.0, float(np.median(sd[sd > 0])) if (sd > 0).any() else 1.0)
     idx = np.flatnonzero(keep)
+    if not per_column:
+        sd = np.full(p, np.sqrt(np.mean(sd[keep] ** 2)))
     Xtr = np.empty((X_train.shape[0], idx.size), np.float32)
     Xte = np.empty((X_test.shape[0], idx.size), np.float32)
     for j in range(0, idx.size, chunk):
