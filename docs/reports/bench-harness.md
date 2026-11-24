@@ -81,8 +81,16 @@ Hardware: serial_requeue nodes, either Xeon Platinum 8268 (2.9 GHz) or 8358 (2.6
 | unit-800k | cpu_ridgecv | 8358 x32 | 10.3 | **0.1253** | 0.0572 | dense | b2a1b9 |
 | unit-800k-raw | cpu_celer | 8358 x32 | 1815 | 0.0026 | -0.0047 | 2.5 | 1d0ba5 |
 | unit-800k-raw | cpu_ridgecv | 8358 x32 | 8.8 | **0.0757** | 0.0328 | dense | 7c1702 |
-| unit-800k | cpu_sklearn_cd | 8358 x32 | running (4 h cap) | | | | job 63239490 |
-| unit-800k-383 | cpu_celer / cpu_sklearn_cd / raw celer | 8358 x32 | running (4 h cap) | | | | jobs 63237102 / 63237105 / 63237109 |
+| unit-800k | cpu_sklearn_cd | 8358 x32 | restarted after preemption, running (4 h cap) | | | | job 63239490 |
+| unit-800k-383 (speed only) | cpu_celer | 8358 x32 | 13,094 | (lost, see below) | | | 457bcb |
+| unit-800k-383-raw (speed only) | cpu_celer | 8358 x32 | 11,431 | 0.294 (3 ch) | | 2 | 6ce27f |
+| unit-800k-383 | cpu_sklearn_cd | 8358 x32 | 4 h cap | | | | job 63237105 |
+| unit-800k-383 | torch_ws (sibling) | H200 | 75.8 | 0.405 (3 ch) | | 3 | 5865c6 |
+
+On the speed-only 383-channel tier, CPU celer needs 3.2-3.6 h for Task CV, against 76 s for torch_ws on an H200
+(~170x). Run 457bcb finished its solve, but its evaluation crashed. The job started before the tier rename and, at
+evaluation time, loaded the new 64-channel `unit-800k` reference. The row was reconstructed by hand from the job
+log with `status: eval_error` and timing only. The runner now ignores a reference whose shape does not match.
 
 (The dev-node celer run on unit-100k-raw, 948 s at 16 jobs on a shared node, is superseded by d3c8bb.)
 Peak RAM: rows before commit d99cbe8 sum RSS over joblib workers, which counts the shared memmap of X once per
@@ -184,6 +192,20 @@ Findings:
 1. **`cpu_ridgecv` gave test R2 -5.9 / -7.8 on pca1k / pca1k-raw.** X is centered on the training rows, which puts the all-ones vector in the null space of XXᵀ. With `fit_intercept=False`, sklearn's LOO-GCV error goes to 0 as alpha → 0 along that direction, so every target picked the smallest alpha (100% of channels at the grid floor). Fixed with `fit_intercept=True` (the fitted intercept is < 3e-9, ignored at prediction). `pca1k-raw` now gives 0.352 reliable (passes the spec v0.1 sanity check; old notebooks: 0.164 all-channel, ours 0.167). Pre-fix ridge rows are dropped by `report.py` (`SUPERSEDED`).
 2. Solvers cast coefficients to float32, which capped the achievable harness gap near 5e-7. They now return float64.
 3. celer under joblib threads does not parallelize (it holds the GIL): 124 s vs 15 s with processes on pca1k. It now runs in loky processes that share one copy-on-write memmap of X in `/dev/shm`. Per-worker copies would need 32 x 5 GB at p = 780k.
+
+## Running from another account
+
+- Tiers are read from `api.DATA_ROOT` (`LASSOBENCH_DATA`, may be read-only). Everything written goes under
+  `api.STORE` (`LASSOBENCH_STORE`): raw dumps `results/raw`, references `cache/ref`, features `cache/features`,
+  logs `results/logs`. Only the tier builders write into `DATA_ROOT`.
+- `LASSOBENCH_RESULTS` sets the result log, and `python -m lassobench.report a.jsonl b.jsonl --out ... --figdir ...` merges several.
+- References are read from `STORE/cache/ref`, then from `DATA_ROOT/../cache/ref`, so a shared copy can carry them.
+- `slurm/bench_*.sh` take the repo from `SLURM_SUBMIT_DIR`, python from `LASSOBENCH_PY`, the account from `sbatch -A`,
+  and tee output to `STORE/results/logs/<job>-<id>.out` (`slurm/bench_common.sh`).
+- Tested: a fresh clone in a clean `env -i` shell with `LASSOBENCH_DATA` = the shared copy and a scratch
+  `LASSOBENCH_STORE` ran `--list`, a pca1k Task P dev run, RidgeCV Task CV on unit-100k (reliable R2 matches),
+  and the report from one and from two result files. Not tested: running as a different user and submitting
+  through Slurm from another account.
 
 ## Contract / spec change requests
 
