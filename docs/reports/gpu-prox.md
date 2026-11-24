@@ -231,6 +231,9 @@ Harness rows (H200, tol 1e-4 where applicable; the unit-800k tier as served to t
 | unit-800k | torch_prox_sgd (300 ep) | P | 82.8 | gap median 0.23, nnz median 1.7e5 |
 | unit-800k | torch_prox_adam (300 ep, lr 1e-2) | P | 115.6 | diverged: gap median 38.5, nnz median 5.8e5 |
 | unit-800k | torch_prox_adam_mb (bs 128, 30 ep, lr 1e-2) | P | 68.4 | diverged: gap median 201 |
+| unit-800k | torch_prox_sgd (300 ep) | CV | 776.5 | R2 reliable 0.127, nnz median 4.1e4 (torch_ws: 0.405, nnz median 3, 75.8 s) |
+| unit-800k | torch_prox_adam (300 ep, lr 1e-2) | CV | 1185.9 | R2 reliable 0.040, nnz median 39.5 |
+| unit-800k | torch_prox_adam_mb (bs 128, 30 ep) | CV | 1449.8 | diverged: R2 reliable -833 |
 | unit-800k | torch_fista screen | P | timeout (3000) | recorded as `status=timeout`; torch_ws: 48.7 s |
 
 - The first unit-800k gradient-optimizer rows errored in sparse extraction (`torch.nonzero` refuses tensors with
