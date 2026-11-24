@@ -108,8 +108,7 @@ Reliable channels only. min = min-CV alpha, 1se = one-standard-error alpha. J-fo
 | cpu_ridgecv | AMD EPYC 9655 96-Core Processor x16 | 2.0 | 0.347 | 0.347 | dense | - | 0.03 (top-100) | - | - | - | - | - | - | - | 0.001 | 0.007 | 0.023 | 0.054 | 0.114 |
 | torch_ws | H200 | 7.1 | 0.347 | 0.326 | 252 | 0.15 | 0.01 | 0.326 | 0.294 | 82 | 0.21 | 0.01 | 0.295 | 0.88 | 0.111 | 0.209 | 0.308 | 0.329 | 0.326 |
 
-Dense-method top-k with a CV-honest ridge refit on the top-k support (R2 reliable): 
-- torch_ws (H200): k=10: trunc 0.001 / refit 0.131, k=30: trunc 0.007 / refit 0.222, k=100: trunc 0.023 / refit 0.282, k=300: trunc 0.054 / refit 0.324, k=1000: trunc 0.114 / refit 0.355
+RidgeCV top-k |w| truncated, and with a CV-honest ridge refit on the top-k support (R2 reliable): 
 - cpu_ridgecv (AMD EPYC 9655 96-Core Processor x16): k=10: trunc 0.001 / refit 0.131, k=30: trunc 0.007 / refit 0.222, k=100: trunc 0.023 / refit 0.282, k=300: trunc 0.054 / refit 0.324, k=1000: trunc 0.114 / refit 0.355
 
 <details><summary>Unranked CV rows (uncommitted solver code, other tol, errors)</summary>
@@ -184,8 +183,7 @@ Reliable channels only. min = min-CV alpha, 1se = one-standard-error alpha. J-fo
 | cpu_ridgecv | AMD EPYC 9655 96-Core Processor x16 | 2.6 | 0.352 | 0.352 | dense | - | 0.04 (top-100) | - | - | - | - | - | - | - | 0.004 | 0.014 | 0.036 | 0.073 | 0.143 |
 | torch_ws | H200 | 5.3 | 0.352 | 0.316 | 206 | 0.19 | 0.02 | 0.317 | 0.274 | 67 | 0.26 | 0.02 | 0.290 | 0.69 | 0.114 | 0.207 | 0.300 | 0.316 | 0.316 |
 
-Dense-method top-k with a CV-honest ridge refit on the top-k support (R2 reliable): 
-- torch_ws (H200): k=10: trunc 0.004 / refit 0.139, k=30: trunc 0.014 / refit 0.209, k=100: trunc 0.036 / refit 0.267, k=300: trunc 0.073 / refit 0.315, k=1000: trunc 0.143 / refit 0.340
+RidgeCV top-k |w| truncated, and with a CV-honest ridge refit on the top-k support (R2 reliable): 
 - cpu_ridgecv (AMD EPYC 9655 96-Core Processor x16): k=10: trunc 0.004 / refit 0.139, k=30: trunc 0.014 / refit 0.209, k=100: trunc 0.036 / refit 0.267, k=300: trunc 0.073 / refit 0.315, k=1000: trunc 0.143 / refit 0.340
 
 <details><summary>Unranked CV rows (uncommitted solver code, other tol, errors)</summary>
@@ -271,8 +269,7 @@ Reliable channels only. min = min-CV alpha, 1se = one-standard-error alpha. J-fo
 | cpu_ridgecv | AMD EPYC 9655 96-Core Processor x16 | 5.1 | 0.125 | 0.125 | dense | - | 0.00 (top-100) | - | - | - | - | - | - | - | -0.003 | -0.003 | -0.002 | -0.001 | 0.001 |
 | torch_ws | H200 | 14.9 | 0.125 | 0.033 | 176 | 0.09 | 0.00 | 0.038 | -0.068 | 17 | 0.12 | 0.00 | -0.236 | 1.00 | 0.009 | 0.033 | -0.057 | 0.039 | 0.033 |
 
-Dense-method top-k with a CV-honest ridge refit on the top-k support (R2 reliable): 
-- torch_ws (H200): k=10: trunc -0.003 / refit 0.009, k=30: trunc -0.003 / refit -0.193, k=100: trunc -0.002 / refit -0.001, k=300: trunc -0.001 / refit 0.037, k=1000: trunc 0.001 / refit 0.051
+RidgeCV top-k |w| truncated, and with a CV-honest ridge refit on the top-k support (R2 reliable): 
 - cpu_ridgecv (AMD EPYC 9655 96-Core Processor x16): k=10: trunc -0.003 / refit 0.009, k=30: trunc -0.003 / refit -0.193, k=100: trunc -0.002 / refit -0.001, k=300: trunc -0.001 / refit 0.037, k=1000: trunc 0.001 / refit 0.051
 
 <details><summary>Unranked CV rows (uncommitted solver code, other tol, errors)</summary>

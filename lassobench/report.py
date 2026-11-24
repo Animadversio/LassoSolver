@@ -152,8 +152,9 @@ def analysis_section(t, an):
                      f"{f(jh, '{:.2f}')} (top-100)", "-", "-", "-", "-", "-", "-", "-"]
         o.append(f"| {r['solver']} | {hw_label(r)} | {f(r.get('time_total_s'), '{:.1f}')} | " + " | ".join(cells) + " | "
                  + " | ".join(f(x, "{:.3f}") for x in fr) + " |")
-    o += ["", "Dense-method top-k with a CV-honest ridge refit on the top-k support (R2 reliable): "]
-    for r in an:
+    o += ["", "RidgeCV top-k |w| truncated, and with a CV-honest ridge refit on the top-k support (R2 reliable): "]
+    dense = [r for r in an if _g(r["analysis"], "frontier_topk_own")]
+    for r in (dense or an[:1]):
         a = r["analysis"]
         fk = _g(a, "frontier_topk_own") or _g(a, "frontier_topk_ridge")
         if fk:
