@@ -48,6 +48,7 @@ N_SPLITS, SPLIT_SEED0 = 5, 1000
 MEMBERS = [1, 2, 3, 4, 5]
 STAB_SEEDS = [1, 2, 3, 4, 5, 6, 7, 8]
 SMOOTH = [1.0, 3.0, 10.0, 30.0]
+SCALE_GAMMAS = [150.0, 220.0, 330.0, 500.0, 1000.0]
 NUC_GRID = np.logspace(0, -2.5, 14)
 NUC_ITERS = 150
 QUICK = [False]
@@ -542,6 +543,8 @@ def part_timing(tier, sp_):
     X = torch.as_tensor(sp_.Xtr, device=DEV)
     Y = torch.as_tensor(sp_.Ytr, device=DEV)
     out = {}
+    tr, va = member_split(sp_.n, 1)
+    fit_fact(X[tr], Y[tr], X[va], Y[va], 1, 4.5, 4.5, 1, 1, {})           # CUDA warm-up (not timed)
     for rank in (1, 2):
         for gam in (4.5,):
             tr, va = member_split(sp_.n, 1)
@@ -557,7 +560,22 @@ def part_timing(tier, sp_):
                                    eff_units_rel=float(rec["eff_units"][sp_.rel].mean()),
                                    protocol_estimate_s=dt * (len(GAMMAS) * 5 + 5 + 1))
             _log(f"timing {tier} r{rank}: {json.dumps(out[f'r{rank}'])}")
-    _save(tier, "timing", meta=_meta(tier, "timing", dict(result=out, data_bytes_gpu=X.numel() * 4)))
+    # full selection protocol (grid x 5 members, retrained members, refit) on an extended gamma grid
+    arrs = {}
+    for rank in (1, 2):
+        torch.cuda.reset_peak_memory_stats()
+        t0 = time.perf_counter()
+        pipe = factgd_pipeline(sp_, rank, {"gammas": GAMMAS + SCALE_GAMMAS}, name="scale")
+        dt = time.perf_counter() - t0
+        out[f"r{rank}_protocol"] = dict(time_s=dt, peak_gpu_gb=torch.cuda.max_memory_allocated() / 1e9,
+                                        n_fits=len(GAMMAS + SCALE_GAMMAS) * len(MEMBERS) + len(MEMBERS) + 1,
+                                        single_r2_rel=float(r2(sp_.Yte, pipe["single_pred"])[sp_.rel].mean()),
+                                        ens_r2_rel=float(r2(sp_.Yte, pipe["mem_pred"].mean(0))[sp_.rel].mean()),
+                                        single_eff_units_rel=float(pipe["single_eff_units"][sp_.rel].mean()),
+                                        frac_at_top_gamma=float(np.mean(pipe["gsel"] == len(GAMMAS + SCALE_GAMMAS) - 1)))
+        arrs[f"r{rank}_gsel"] = pipe["gsel"]
+        _log(f"protocol {tier} r{rank}: {json.dumps(out[f'r{rank}_protocol'])}")
+    _save(tier, "timing", meta=_meta(tier, "timing", dict(result=out, data_bytes_gpu=X.numel() * 4)), **arrs)
 
 
 def main(argv=None):
