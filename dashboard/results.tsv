@@ -119,3 +119,33 @@ unit-100k-raw	cpu_ridgecv		H200	gpu	64	2.61	0.167	0.352	1e+05	harness 2026-11-23
 unit-800k	torch_ws		H200	gpu	64	14.9	0.0244	0.0326	102	harness 2026-11-23	50 alphas x 5 folds, p=779947
 unit-800k	cpu_ridgecv		H200	gpu	64	5.11	0.0572	0.125	7.8e+05	harness 2026-11-23	50 alphas x 5 folds, p=779947
 unit-800k-raw	cpu_celer		32 CPU threads	cpu	383	1.14e+04	0.00849	0.294	10.5	harness 2026-11-23	tol=0.0001; 50 alphas x 5 folds, p=779947
+unit-100k	fact_r2_ridgecv	RidgeCV (single, 100%)	H200	gpu	64			0.347		harness 2026-11-24	5 splits: 0.358 +- 0.021, vs RidgeCV +0.000 (SE 0.000)
+unit-100k	fact_r2_ridge_bag5	Ridge, 5 bagged 80% fits	H200	gpu	64			0.345		harness 2026-11-24	5 splits: 0.355 +- 0.022, vs RidgeCV -0.004 (SE 0.001)
+unit-100k	fact_r2_lasso_cv	Lasso CV torch_ws (single, 100%)	H200	gpu	64			0.326		harness 2026-11-24	5 splits: 0.354 +- 0.024, vs RidgeCV -0.004 (SE 0.005); nonzeros on reliable channels 265
+unit-100k	fact_r2_lasso_mem5	Lasso 5-member ens.	H200	gpu	64			0.343		harness 2026-11-24	5 splits: 0.367 +- 0.026, vs RidgeCV +0.008 (SE 0.004); nonzeros on reliable channels 281
+unit-100k	fact_r2_factgd_r1_single	factgd r1 single (100% refit)	H200	gpu	64			0.343		harness 2026-11-24	5 splits: 0.364 +- 0.028, vs RidgeCV +0.006 (SE 0.004); nonzeros on reliable channels 10597
+unit-100k	fact_r2_factgd_r1_ens5	factgd r1 5-member ens.	H200	gpu	64			0.353		harness 2026-11-24	5 splits: 0.365 +- 0.036, vs RidgeCV +0.007 (SE 0.007); nonzeros on reliable channels 9305
+unit-100k	fact_r2_factgd_r2_single	factgd r2 single (100% refit)	H200	gpu	64			0.345		harness 2026-11-24	5 splits: 0.363 +- 0.036, vs RidgeCV +0.005 (SE 0.008); nonzeros on reliable channels 11732
+unit-100k	fact_r2_factgd_r2_ens5	factgd r2 5-member ens.	H200	gpu	64			0.349		harness 2026-11-24	5 splits: 0.368 +- 0.036, vs RidgeCV +0.010 (SE 0.007); nonzeros on reliable channels 10022
+unit-100k	fact_r2_nuclear_single	nuclear-norm single (100% refit)	H200	gpu	64			0.375		harness 2026-11-24	5 splits: 0.384 +- 0.028, vs RidgeCV +0.026 (SE 0.004)
+unit-100k	fact_r2_nuclear_ens5	nuclear-norm 5-member ens.	H200	gpu	64			0.371		harness 2026-11-24	5 splits: 0.379 +- 0.028, vs RidgeCV +0.021 (SE 0.004)
+unit-100k	fact_r2_ridge_member80	Ridge one 80% fit	H200	gpu	64			0.333		harness 2026-11-24	5 splits: 0.343 +- 0.022, vs RidgeCV -0.015 (SE 0.001)
+unit-100k	fact_r2_lasso_member80	Lasso one 80% member	H200	gpu	64			0.306		harness 2026-11-24	5 splits: 0.325 +- 0.024, vs RidgeCV -0.033 (SE 0.003); nonzeros on reliable channels 281
+unit-100k	fact_r2_factgd_r1_member80	factgd r1 one 80% member	H200	gpu	64			0.334		harness 2026-11-24	5 splits: 0.347 +- 0.039, vs RidgeCV -0.011 (SE 0.009); nonzeros on reliable channels 9305
+unit-100k	fact_r2_factgd_r2_member80	factgd r2 one 80% member	H200	gpu	64			0.334		harness 2026-11-24	5 splits: 0.350 +- 0.039, vs RidgeCV -0.009 (SE 0.009); nonzeros on reliable channels 10022
+unit-100k	fact_r2_nuclear_member80	nuclear-norm one 80% member	H200	gpu	64			0.358		harness 2026-11-24	5 splits: 0.367 +- 0.028, vs RidgeCV +0.009 (SE 0.004)
+unit-200k-l3	fact_r2_ridgecv	RidgeCV (single, 100%), test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.303		harness 2026-11-24	5 splits: 0.324 +- 0.016, vs RidgeCV +0.000 (SE 0.000)
+unit-200k-l3	fact_r2_ridge_bag5	Ridge, 5 bagged 80% fits, test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.3		harness 2026-11-24	5 splits: 0.317 +- 0.016, vs RidgeCV -0.007 (SE 0.001)
+unit-200k-l3	fact_r2_lasso_cv	Lasso CV torch_ws (single, 100%), test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.248		harness 2026-11-24	5 splits: 0.288 +- 0.025, vs RidgeCV -0.036 (SE 0.006); nonzeros on reliable channels 364
+unit-200k-l3	fact_r2_lasso_mem5	Lasso 5-member ens., test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.274		harness 2026-11-24	5 splits: 0.307 +- 0.027, vs RidgeCV -0.017 (SE 0.006); nonzeros on reliable channels 352
+unit-200k-l3	fact_r2_factgd_r1_single	factgd r1 single (100% refit), test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.32		harness 2026-11-24	5 splits: 0.353 +- 0.033, vs RidgeCV +0.030 (SE 0.009); nonzeros on reliable channels 21385
+unit-200k-l3	fact_r2_factgd_r1_ens5	factgd r1 5-member ens., test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.35		harness 2026-11-24	5 splits: 0.373 +- 0.023, vs RidgeCV +0.050 (SE 0.004); nonzeros on reliable channels 18185
+unit-200k-l3	fact_r2_factgd_r2_single	factgd r2 single (100% refit), test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.324		harness 2026-11-24	5 splits: 0.360 +- 0.025, vs RidgeCV +0.036 (SE 0.005); nonzeros on reliable channels 19884
+unit-200k-l3	fact_r2_factgd_r2_ens5	factgd r2 5-member ens., test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.353		harness 2026-11-24	5 splits: 0.379 +- 0.025, vs RidgeCV +0.055 (SE 0.005); nonzeros on reliable channels 17868
+unit-200k-l3	fact_r2_nuclear_single	nuclear-norm single (100% refit), test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.365		harness 2026-11-24	5 splits: 0.389 +- 0.022, vs RidgeCV +0.066 (SE 0.004)
+unit-200k-l3	fact_r2_nuclear_ens5	nuclear-norm 5-member ens., test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.362		harness 2026-11-24	5 splits: 0.385 +- 0.022, vs RidgeCV +0.061 (SE 0.004)
+unit-200k-l3	fact_r2_ridge_member80	Ridge one 80% fit, test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.289		harness 2026-11-24	5 splits: 0.306 +- 0.016, vs RidgeCV -0.018 (SE 0.002)
+unit-200k-l3	fact_r2_lasso_member80	Lasso one 80% member, test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.227		harness 2026-11-24	5 splits: 0.255 +- 0.026, vs RidgeCV -0.068 (SE 0.006); nonzeros on reliable channels 352
+unit-200k-l3	fact_r2_factgd_r1_member80	factgd r1 one 80% member, test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.306		harness 2026-11-24	5 splits: 0.333 +- 0.025, vs RidgeCV +0.009 (SE 0.005); nonzeros on reliable channels 18185
+unit-200k-l3	fact_r2_factgd_r2_member80	factgd r2 one 80% member, test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.316		harness 2026-11-24	5 splits: 0.344 +- 0.026, vs RidgeCV +0.020 (SE 0.005); nonzeros on reliable channels 17868
+unit-200k-l3	fact_r2_nuclear_member80	nuclear-norm one 80% member, test columns clipped	A100-SXM4-40GB MIG 3g.20gb	gpu	64			0.351		harness 2026-11-24	5 splits: 0.373 +- 0.022, vs RidgeCV +0.049 (SE 0.004)
