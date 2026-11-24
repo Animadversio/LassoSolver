@@ -20,7 +20,8 @@ from lassobench.runner import REPO, RESULTS, read_results
 
 LB = os.path.join(REPO, "tables", "leaderboard.md")
 FIG = os.path.join(REPO, "figures")
-TIER_ORDER = ["syn-s", "pca1k", "pca1k-raw", "unit-100k", "unit-800k", "unit-xl", "syn-xl"]
+TIER_ORDER = ["unit-100k", "unit-100k-raw", "unit-800k", "unit-800k-raw", "unit-800k-383", "unit-800k-383-raw",
+              "unit-xl", "syn-xl", "syn-s", "pca1k", "pca1k-raw"]
 # fixed categorical order (validated reference palette); a solver keeps its color across figures
 PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
 
@@ -44,7 +45,9 @@ def f(x, fmt="{:.3g}"):
 SUPERSEDED = {"cpu_ridgecv": "0f359b3"}
 RANK_TOL = 1e-4
 TIER_NOTES = {"unit-100k": "64 channels (paul_20241119-20241122)", "unit-100k-raw": "64 channels",
-              "unit-800k": "383 channels (paul_241119-241122, same 1028 images)", "unit-800k-raw": "383 channels",
+              "unit-800k": "64 l_cIT channels, same Y/split as unit-100k", "unit-800k-raw": "64 channels",
+              "unit-800k-383": "SPEED-ONLY: 383 l_STS channels, 3 reliable; R2 not comparable to other tiers",
+              "unit-800k-383-raw": "SPEED-ONLY: 383 l_STS channels",
               "pca1k": "64 channels", "pca1k-raw": "64 channels, unstandardized PCA scores"}
 _git_cache = {}
 
@@ -81,12 +84,37 @@ def superseded(r):
         and _git("merge-base", "--is-ancestor", fix, r["git_hash"]) != 0
 
 
+def remap_tier(r):
+    """Rows written before the 2026-11-23 rename: 'unit-800k*' with 383 targets are now 'unit-800k-383*'."""
+    t = r.get("tier", "")
+    if t.startswith("unit-800k") and "383" not in t and r.get("shape", {}).get("T") == 383 and r.get("max_targets") is None:
+        r["tier"] = t.replace("unit-800k", "unit-800k-383")
+    return r
+
+
 def keep(r):
     return r.get("max_targets") is None and (r.get("tag") or "") != "dev"
 
 
+def edge(r):
+    """Edge fractions; for older rows recomputed from the raw dump's best_idx and the harness grid."""
+    m = r.get("metrics", {})
+    if "frac_best_smallest_alpha" in m:
+        return f"{m['frac_best_smallest_alpha']:.2f} / {m['frac_best_largest_alpha']:.2f}"
+    raw = r.get("raw")
+    if not raw or not os.path.exists(raw) or "ridge" in r["solver"] or "legacy" in r["solver"]:
+        return "-"
+    import numpy as np
+    z = np.load(raw)
+    if "best_idx" not in z.files:
+        return "-"
+    bi = z["best_idx"]
+    A = r["config"].get("n_alphas") or 50
+    return f"{np.mean(bi == A - 1):.2f} / {np.mean(bi == 0):.2f}"
+
+
 def build(rows=None):
-    rows = [r for r in (rows if rows is not None else read_results()) if keep(r) and not superseded(r)]
+    rows = [remap_tier(r) for r in (rows if rows is not None else read_results()) if keep(r) and not superseded(r)]
     files = _solver_files()
     for r in rows:
         r["_ranked"] = committed(r, files)
@@ -137,16 +165,18 @@ def build(rows=None):
             out += ["", "</details>", ""]
         CV = [r for r in rs if r["task"] == "CV"]
         if CV:
-            hdr = ["| rank | solver | hardware | status | time (s) | test R2 reliable (mean) | reliable (median) | "
-                   "all-channel mean | train R2 | nnz med | Jaccard vs ref | git |",
-                   "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+            hdr = ["| rank | solver | hardware | status | time (s) | test R2 reliable (mean) | n reliable | reliable (median) | "
+                   "all-channel mean | train R2 | nnz med | alpha at grid edge: smallest / largest | Jaccard vs ref | git |",
+                   "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
 
             def line(rk, r):
                 m = r.get("metrics", {})
                 return (f"| {rk} | {r['solver']} | {hw_label(r)} | {r['status']} | {f(r.get('time_total_s'), '{:.1f}')} | "
-                        f"**{f(m.get('r2_test_mean_reliable'), '{:.4f}')}** | {f(m.get('r2_test_median_reliable'), '{:.4f}')} | "
+                        f"**{f(m.get('r2_test_mean_reliable'), '{:.4f}')}** | {m.get('n_reliable', '-')} | "
+                        f"{f(m.get('r2_test_median_reliable'), '{:.4f}')} | "
                         f"{f(m.get('r2_test_mean'), '{:.4f}')} | {f(m.get('r2_train_mean'), '{:.3f}')} | "
-                        f"{f(m.get('nnz_median'), '{:.0f}')} | {f(m.get('jaccard_ref_mean'), '{:.3f}')} | {(r.get('git_hash') or '')[:7]} |")
+                        f"{f(m.get('nnz_median'), '{:.0f}')} | {edge(r)} | {f(m.get('jaccard_ref_mean'), '{:.3f}')} | "
+                        f"{(r.get('git_hash') or '')[:7]} |")
             nrel = next((r["metrics"].get("n_reliable") for r in CV if r.get("metrics")), None)
             out += [f"**Task CV** - 5-fold CV over the 50-alpha grid, refit, held-out test split. Ranked by test R2 over "
                     f"reliable channels (reliability >= 0.5; {nrel} of {shape.get('T')}), tol {RANK_TOL:g}, per hardware.", ""]

@@ -351,6 +351,10 @@ def run(solver_name, tier_name, task="P", solver_args=None, timeout=None, warmup
     raw = {}
     if result is not None and evaluate:
         ref = ev.load_reference(tier_name) if max_targets is None else None
+        if ref is not None and (ref["objective"].shape != (alphas.shape[0], Y.shape[1])
+                                or not np.allclose(ref["alphas"], alphas, rtol=1e-5)):
+            print(f"[run {run_id}] cached reference does not match this tier's grid/targets; ignored", flush=True)
+            ref = None
         t0 = time.perf_counter()
         if task == "P":
             check_path_result(result, X.shape[1], Y.shape[1], alphas.shape[0])

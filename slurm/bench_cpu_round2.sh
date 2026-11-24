@@ -10,11 +10,10 @@ $SUB -J r2-u100k $S \
   "--solver cpu_ridgecv --tier unit-100k --task CV --tag round2" \
   "--solver cpu_ridgecv --tier unit-100k-raw --task CV --tag round2" \
   "--solver cpu_celer --tier unit-100k-raw --task CV --solver-args tol=1e-4 --timeout $T --tag round2"
-$SUB -J r2-u800k-celer $S "--solver cpu_celer --tier unit-800k --task CV --solver-args tol=1e-4 --timeout $T --tag round2"
-$SUB -J r2-u800k-skl $S "--solver cpu_sklearn_cd --tier unit-800k --task CV --solver-args tol=1e-4 --timeout $T --tag round2"
-$SUB -J r2-u800k-raw $S \
-  "--solver cpu_ridgecv --tier unit-800k --task CV --tag round2" \
-  "--solver cpu_ridgecv --tier unit-800k-raw --task CV --tag round2" \
+# unit-800k = 64 l_cIT channels (statistical tier); unit-800k-383 = speed-only (renamed 2026-11-23; jobs submitted
+# before the rename ran on the 383-ch data under the old name and are remapped by report.py)
+$SUB -J r3-u800k-celer $S "--solver cpu_ridgecv --tier unit-800k --task CV --tag round2" \
+  "--solver cpu_celer --tier unit-800k --task CV --solver-args tol=1e-4 --timeout $T --tag round2"
+$SUB -J r3-u800k-skl $S "--solver cpu_sklearn_cd --tier unit-800k --task CV --solver-args tol=1e-4 --timeout $T --tag round2"
+$SUB -J r3-u800k-raw $S "--solver cpu_ridgecv --tier unit-800k-raw --task CV --tag round2" \
   "--solver cpu_celer --tier unit-800k-raw --task CV --solver-args tol=1e-4 --timeout $T --tag round2"
-$SUB -J r2-u800k-c64 $S "--solver cpu_ridgecv --tier unit-800k-c64 --task CV --tag round2" \
-  "--solver cpu_celer --tier unit-800k-c64 --task CV --solver-args tol=1e-4 --timeout $T --tag round2"

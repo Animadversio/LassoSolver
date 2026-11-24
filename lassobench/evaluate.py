@@ -112,6 +112,18 @@ def jaccard_cols(A, B):
     return out
 
 
+def edge_fractions(alphas, best_idx):
+    """Fraction of targets whose chosen alpha is the smallest / largest alpha of its grid column."""
+    al = np.asarray(alphas, np.float64)
+    bi = np.asarray(best_idx)
+    if al.ndim != 2 or al.shape[0] < 2:
+        return {}
+    cols = np.arange(len(bi)) % al.shape[1]
+    chosen = al[bi, cols]
+    return dict(frac_best_smallest_alpha=float(np.mean(np.isclose(chosen, al.min(0)[cols]))),
+                frac_best_largest_alpha=float(np.mean(np.isclose(chosen, al.max(0)[cols]))))
+
+
 def cv_quality(tier, coef, best_idx, alphas, ref=None):
     """Statistical metrics for Task CV. coef: (p, T) sparse or dense refit at the chosen alphas."""
     Yp = predict(tier.X_test, coef)
@@ -139,6 +151,7 @@ def cv_quality(tier, coef, best_idx, alphas, ref=None):
     if best_idx is not None:
         bi = np.asarray(best_idx)
         s.update(best_idx_median=float(np.median(bi)), frac_best_at_edge=float(np.mean((bi == 0) | (bi == np.shape(alphas)[0] - 1))))
+        s.update(edge_fractions(alphas, bi))
     if "jaccard_ref" in out:
         s["jaccard_ref_mean"] = float(np.mean(out["jaccard_ref"]))
     return out, s

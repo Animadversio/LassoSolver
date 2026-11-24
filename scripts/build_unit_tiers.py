@@ -2,8 +2,8 @@
 """Build real unit-basis tiers on a GPU node (owned by bench-harness).
 
   unit-100k : resnet50_robust .layer4.Bottleneck0 output (2048x7x7 = 100352), paul_20241119-20241122, 64 ch
-  unit-800k : resnet50_robust .layer1.Bottleneck0 output (256x56x56 = 802816), paul_241119-241122, 383 ch
-              (same 1028 images; falls back to the 64-ch subject if the stimulus lists differ)
+  unit-800k : resnet50_robust .layer1.Bottleneck0 output (256x56x56 = 802816), paul_20241119-20241122, 64 ch
+  unit-800k-383 : same X, paul_241119-241122 383 l_STS channels (speed-only; 3 reliable channels)
 
 Images and order come from the old Xdict pickle (whose responses equal the HDF5 subject's repavg exactly);
 split = old train_test_split(test_size=0.2, random_state=42). X z-scored on training rows, constant columns
@@ -12,7 +12,7 @@ dropped, Y z-scored on training rows. Raw features cached under STORE/cache/feat
 Sanity check: the top principal components of our layer4.B0 features must match the pickle's pca1000 columns
 (same images, same order, same model) -> |corr| ~ 1.
 
-Usage: python scripts/build_unit_tiers.py [unit-100k] [unit-800k] [unit-100k-raw] [unit-800k-raw] [--overwrite]
+Usage: python scripts/build_unit_tiers.py [unit-100k] [unit-800k] [unit-800k-383] [<name>-raw ...] [--overwrite]
 "-raw" tiers (spec v0.1): same features/rows/columns kept, centered on train rows, one global scale.
 """
 import os
@@ -32,10 +32,10 @@ from lassobench.data import (PCA_PKL, load_paul_neural, neural_meta, old_split, 
 
 FEAT_DIR = os.path.join(STORE, "cache", "features")
 LAYERS = {"unit-100k": ("layer4", 0, "paul_20241119-20241122"),
-          "unit-800k": ("layer1", 0, "paul_241119-241122")}
-# unit-800k's 383 channels (l_STS array) have only 3 channels with reliability >= 0.5; the c64 variant uses the
-# 64-ch l_cIT subject (20 reliable, same as unit-100k) on the same layer1 features.
-LAYERS["unit-800k-c64"] = ("layer1", 0, "paul_20241119-20241122")
+          # statistical tier: same 64 l_cIT channels / split as unit-100k
+          "unit-800k": ("layer1", 0, "paul_20241119-20241122"),
+          # speed-only tier: 383 l_STS channels, only 3 with reliability >= 0.5 (R2 not comparable)
+          "unit-800k-383": ("layer1", 0, "paul_241119-241122")}
 LAYERS.update({f"{k}-raw": v for k, v in list(LAYERS.items())})
 
 
