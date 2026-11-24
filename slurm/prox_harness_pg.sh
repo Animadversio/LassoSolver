@@ -1,7 +1,9 @@
 #!/bin/bash
-# gpu-prox: gradient-optimizer Lasso family through the harness on unit-100k (Task P and CV).
+# gpu-prox: gradient-optimizer Lasso family through the harness (Task P and CV).
+#   sbatch -p gpu_h200 slurm/prox_harness_pg.sh                                # unit-100k, full list
+#   sbatch -p gpu_h200 --export=ALL,TIER=unit-800k,LIGHT=1 slurm/prox_harness_pg.sh
 #SBATCH -J prox-hpg
-#SBATCH -t 0-10:00
+#SBATCH -t 0-14:00
 #SBATCH -c 8
 #SBATCH --mem=120G
 #SBATCH --gres=gpu:1
@@ -12,6 +14,14 @@ PY=/n/home12/binxuwang/.conda/envs/torch2/bin/python
 nvidia-smi -L
 TIER=${TIER:-unit-100k}
 rb() { $PY -u scripts/run_bench.py --tag gpu-prox --tier $TIER --timeout 5000 "$@"; }
+if [ -n "$LIGHT" ]; then   # unit-800k: ~7 min per fit at 300 epochs, keep the list short
+for task in P CV; do
+rb --task $task --solver torch_prox_adam     --solver-args epochs=300 lr=1e-2
+rb --task $task --solver torch_prox_sgd      --solver-args epochs=300 lr_schedule=const
+rb --task $task --solver torch_prox_adam_mb  --solver-args epochs=30 lr=1e-2 batch_size=128
+done
+exit 0
+fi
 for task in P CV; do
 rb --task $task --solver torch_prox_adam     --solver-args epochs=300 lr=1e-2
 rb --task $task --solver torch_prox_adam     --solver-args epochs=1000 lr=1e-2
