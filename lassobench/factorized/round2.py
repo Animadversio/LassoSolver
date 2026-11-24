@@ -51,7 +51,7 @@ SMOOTH = [1.0, 3.0, 10.0, 30.0]
 SCALE_GAMMAS = [150.0, 220.0, 330.0, 500.0, 1000.0]
 NUC_GRID = np.logspace(0, -2.5, 14)
 NUC_ITERS = 150
-QUICK = [False]
+QUICK = [False, False]   # [quick mode, clip mode]
 DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -77,6 +77,16 @@ class Split:
 
     def flat(self, X):
         return X.reshape(len(X), -1)
+
+
+def clip_test(sp_):
+    """Clip each test column to that column's range on the split's training rows (training statistics only).
+
+    Layer3 maps are sparse after the ReLU: columns active in very few images z-score to test values in the
+    thousands, which wrecks per-unit linear readouts on some splits. `--clip` runs everything on clipped X_test."""
+    lo, hi = sp_.Xtr.min(0), sp_.Xtr.max(0)
+    sp_.Xte = np.clip(sp_.Xte, lo, hi)
+    return sp_
 
 
 def load_splits(tier, ks):
@@ -433,7 +443,7 @@ def part_nuclear(tier, splits):
         t0 = time.perf_counter()
         nuc = nuclear_pipeline(sp_)
         res = {f"nuclear_{k_}": v for k_, v in nuc.items() if k_ != "single_W"}
-        if k == 0:
+        if k == 0 and not QUICK[1]:
             res["nuclear_single_W"] = nuc["single_W"]
             n = sp_.n
             subsets = [("sub%d" % m, member_split(n, m)[0]) for m in MEMBERS]
@@ -457,7 +467,7 @@ def part_nuclear(tier, splits):
 # ----------------------------------------------------------------------------------------------- parts
 
 def _save(tier, part, **arrs):
-    od = os.path.join(OUT_DIR, tier, "round2_quick" if QUICK[0] else "round2")
+    od = os.path.join(OUT_DIR, tier, ("round2_quick" if QUICK[0] else "round2") + ("_clip" if QUICK[1] else ""))
     os.makedirs(od, exist_ok=True)
     fp = os.path.join(od, f"{part}.npz")
     np.savez_compressed(fp, **arrs)
@@ -470,7 +480,7 @@ def _meta(tier, part, extra=None):
     if DEV.type == "cuda":
         hw["gpu_model_torch"] = torch.cuda.get_device_name()
         hw["gpu_model"] = hw.get("gpu_model") or hw["gpu_model_torch"]
-    return json.dumps(dict(tier=tier, part=part, hardware=hw, **git_info(), argv=sys.argv,
+    return json.dumps(dict(tier=tier, part=part, hardware=hw, **git_info(), argv=sys.argv, clip_test=QUICK[1],
                            timestamp=time.strftime("%Y-%m-%d %H:%M:%S"), **(extra or {})), default=str)
 
 
@@ -627,7 +637,9 @@ def main(argv=None):
     ap.add_argument("--splits", default=",".join(str(k) for k in range(N_SPLITS)))
     ap.add_argument("--only", default=None, help="comma list of ablation names")
     ap.add_argument("--quick", action="store_true", help="tiny grids, 2 members (smoke test; not for results)")
+    ap.add_argument("--clip", action="store_true", help="clip X_test to training-row ranges (-> round2_clip/)")
     a = ap.parse_args(argv)
+    QUICK[1] = a.clip
     if a.quick:
         global GAMMAS, MEMBERS, STAB_SEEDS, SMOOTH, NUC_GRID, NUC_ITERS
         GAMMAS, MEMBERS, STAB_SEEDS, SMOOTH = [0.0, 4.5], [1, 2], [1, 2], [3.0]
@@ -640,6 +652,8 @@ def main(argv=None):
         ks = sorted(set(ks) | {0})
     t0 = time.perf_counter()
     d, S = load_splits(a.tier, ks)
+    if a.clip:
+        S = {k: clip_test(v) for k, v in S.items()}
     _log(f"loaded {a.tier} splits {ks} ({time.perf_counter() - t0:.0f}s) on {DEV} "
          f"{torch.cuda.get_device_name() if DEV.type == 'cuda' else ''}")
     if "timing" in parts:
